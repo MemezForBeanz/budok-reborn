@@ -80,6 +80,9 @@ func _tools() -> Array:
 
 func _take_turn(slot: String, token: String) -> void:
 	yield(get_tree(), "idle_frame")
+	# Match-start notes for these characters come first (schemas.auto).
+	while runtime.schema_jobs.holding() and runtime.matches.turn_for_token(token) != null:
+		yield(get_tree().create_timer(0.5), "timeout")
 	var view = runtime.matches.turn_view(slot, "summary")
 	if view.empty() or view["turn_token"] != token:
 		_busy[slot] = ""

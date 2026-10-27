@@ -593,6 +593,10 @@ func _close_turn(slot: String, how: String) -> void:
 func _check_timeout(slot: String, turn: Dictionary) -> void:
 	if turn.has("applied"):
 		return
+	# Bots wait for match-start notes (schemas.auto); the clock starts after.
+	if runtime.schema_jobs != null and runtime.schema_jobs.holding():
+		turn["opened_ms"] = Util.now_ms()
+		return
 	var controller = controllers[slot]
 	if controller == "human" or (controller == "mcp" and owners[slot] == ""):
 		return

@@ -55,7 +55,6 @@
       "batch_size": 10,
       "include_source": true,
       "max_source_chars": 6000,
-      "auto_generate_missing": false,
       "refusal_fallback": true,
       "extra_body": {}
     }
@@ -66,7 +65,13 @@
   },
   "schemas": {
     "registry_enabled": false,
-    "registry_url": ""
+    "registry_url": "",
+    "auto": {
+      "enabled": true,
+      "workers": "both",
+      "when": "matches",
+      "match_start": true
+    }
   },
   "memory": {
     "enabled": true,

@@ -13,6 +13,7 @@ const Roster = preload("res://budok/core/Roster.gd")
 const Introspector = preload("res://budok/core/Introspector.gd")
 const SchemaStore = preload("res://budok/core/SchemaStore.gd")
 const Memory = preload("res://budok/core/Memory.gd")
+const SchemaJobs = preload("res://budok/core/SchemaJobs.gd")
 const SourceBrowser = preload("res://budok/core/SourceBrowser.gd")
 const MatchController = preload("res://budok/core/MatchController.gd")
 const Simulator = preload("res://budok/core/Simulator.gd")
@@ -40,6 +41,7 @@ var mcp = null
 var llm = null
 var autopilot = null
 var annotator = null
+var schema_jobs = null
 var panel = null
 var mod_menu = null
 var options_menu = null
@@ -68,6 +70,8 @@ func _ready() -> void:
 	autopilot.setup(self, llm)
 	annotator = _add(Annotator.new(), "Annotator")
 	annotator.setup(self, llm)
+	schema_jobs = _add(SchemaJobs.new(), "SchemaJobs")
+	schema_jobs.setup(self)
 	mcp = _add(McpServer.new(), "Mcp")
 	mcp.setup(self)
 	restart_server()
@@ -127,6 +131,7 @@ func status() -> Dictionary:
 			"autopilot": autopilot.stats,
 		},
 		"annotation_jobs": annotator.jobs.values(),
+		"schema_jobs": schema_jobs.summary(),
 	}
 
 

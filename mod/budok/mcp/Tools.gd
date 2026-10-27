@@ -7,7 +7,7 @@ extends Reference
 
 const Util = preload("res://budok/core/Util.gd")
 const MatchStarter = preload("res://budok/core/MatchStarter.gd")
-const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", "ai.annotate."]
+const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", "ai.annotate.", "schemas.auto."]
 const SETTING_BLOCKLIST := ["api_key", "base_url", "auth_token"]
 const SESSION_TAKEOVER_MS := 120000
 
@@ -113,7 +113,10 @@ func _define() -> void:
 		"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "only_mine": {"type": "boolean", "description": "Only memories written by this client."}}, [], true)
 	_add("forget", "Forget", "Delete one memory by its id (from recall).", {"id": {"type": "string"}}, ["id"])
 	_add("get_settings", "Get settings", "Current budok settings (secrets redacted).", {}, [], true)
-	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.* or ai.annotate.* (no keys or URLs).",
+	_add("get_schema_task", "Get schema task", "Automatic notes: the character this session should write notes for next (budok hands them to a chatbot that has claimed a slot), with instructions and progress. null when there is nothing to do.", {}, [], true)
+	_add("finish_schema_task", "Finish schema task", "End your schema task early: done, or skipped: true to hand it back. Tasks also finish by themselves once every move and the summary have notes.",
+		{"character": {"type": "string"}, "skipped": {"type": "boolean"}}, [])
+	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.*, ai.annotate.* or schemas.auto.* (no keys or URLs).",
 		{"path": {"type": "string"}, "value": {}}, ["path", "value"])
 
 
@@ -136,7 +139,47 @@ func _add(name: String, title: String, description: String, properties: Dictiona
 func _t_get_status(_args: Dictionary, sid: String) -> Dictionary:
 	var status = runtime.status()
 	status["your_slots"] = runtime.matches.slots_of(sid)
+	_add_schema_task(status, sid)
 	return status
+
+
+func _t_get_schema_task(_args: Dictionary, sid: String) -> Dictionary:
+	if runtime.matches.slots_of(sid).empty():
+		return {"ok": true, "task": null, "message": "schema tasks go to a chatbot that has claimed a slot (claim_slot or start_match)", "queue": runtime.schema_jobs.summary()}
+	var task = runtime.schema_jobs.task_for(sid)
+	return {"ok": true, "task": task if not task.empty() else null, "queue": runtime.schema_jobs.summary()}
+
+
+func _t_finish_schema_task(args: Dictionary, sid: String) -> Dictionary:
+	return runtime.schema_jobs.finish_task(sid, str(args.get("character", "")), bool(args.get("skipped", false)))
+
+
+func _add_schema_task(result: Dictionary, sid: String) -> void:
+	var task = runtime.schema_jobs.task_for(sid)
+	if not task.empty():
+		result["schema_task"] = task
+
+
+# Notes for this match's characters come before the first move: this session
+# writes them itself when the job is handed to it, or waits while the in-game
+# AI writes them.
+func _hold_for_notes(sid: String, timeout_s: float):
+	yield(runtime.get_tree(), "idle_frame")
+	var deadline = Util.now_ms() + int(timeout_s * 1000.0)
+	while true:
+		var job = runtime.schema_jobs.blocking_job()
+		if job.empty():
+			return {}
+		var task = runtime.schema_jobs.task_for(sid, true)
+		if not task.empty():
+			return {"ok": true, "status": "schema_task", "task": task,
+				"message": "Before playing, write notes for %s (automatic notes are on); your first turn waits for them. Then call wait_for_turn again." % task["character"]}
+		if Util.now_ms() >= deadline:
+			return {"ok": true, "status": "waiting", "reason": "notes",
+				"message": "%s is writing notes for %s (%s); the match continues once they are saved. Call wait_for_turn again." % [
+					"The in-game AI" if job["worker"] == "api" else "Another chatbot", job["character"], job.get("progress", "")]}
+		yield(runtime.get_tree().create_timer(0.25), "timeout")
+	return {}
 
 
 func _t_list_characters(_args: Dictionary, _sid: String) -> Dictionary:
@@ -178,6 +221,8 @@ func _t_start_match(args: Dictionary, sid: String):
 				runtime.matches.claim(slot, sid, true)
 		result["your_slots"] = runtime.matches.slots_of(sid)
 		result["next"] = "call wait_for_turn"
+		runtime.schema_jobs.on_claimed(sid)
+		_add_schema_task(result, sid)
 		_add_notes_hint(result)
 		_add_memories(result)
 	return result
@@ -269,7 +314,11 @@ func _t_set_controller(args: Dictionary, _sid: String) -> Dictionary:
 func _t_claim_slot(args: Dictionary, sid: String) -> Dictionary:
 	var slot = str(args.get("slot", ""))
 	var force = bool(args.get("force", false)) or _owner_gone(runtime.matches.owners.get(slot, ""), sid)
-	return runtime.matches.claim(slot, sid, force)
+	var result = runtime.matches.claim(slot, sid, force)
+	if result.get("ok", false):
+		runtime.schema_jobs.on_claimed(sid)
+		_add_schema_task(result, sid)
+	return result
 
 
 func _t_release_slot(args: Dictionary, sid: String) -> Dictionary:
@@ -283,9 +332,13 @@ func _t_wait_for_turn(args: Dictionary, sid: String):
 		return slot
 	var max_wait = float(runtime.config.get_value("mcp.max_wait_s", 25))
 	var timeout_s = clamp(float(args.get("timeout_s", 20)), 1.0, max(1.0, max_wait))
+	var held = yield(_hold_for_notes(sid, timeout_s), "completed")
+	if not held.empty():
+		return held
 	var waited = yield(runtime.matches.wait_turn(slot["slot"], timeout_s), "completed")
 	if waited["status"] != "your_turn":
 		waited["ok"] = true
+		_add_schema_task(waited, sid)
 		return waited
 	var view = runtime.matches.turn_view(slot["slot"], str(args.get("detail", "summary")))
 	view["ok"] = true
@@ -304,6 +357,9 @@ func _t_get_turn(args: Dictionary, sid: String) -> Dictionary:
 	if view.empty():
 		return {"ok": true, "status": "no_open_turn", "match": runtime.matches.status()}
 	view["ok"] = true
+	var task = runtime.schema_jobs.task_for(sid, true)
+	if not task.empty():
+		view["schema_task"] = task
 	return view
 
 
@@ -371,7 +427,12 @@ func _t_submit_character_schema(args: Dictionary, sid: String) -> Dictionary:
 		return entry
 	var session = runtime.mcp.sessions.get(sid, {})
 	var provenance = {"by": "mcp", "client": session.get("client", {}).get("name", "unknown"), "at": Time.get_datetime_string_from_system()}
-	return runtime.schemas.submit(entry, args.get("schema"), provenance, bool(args.get("replace", false)), bool(args.get("override", false)))
+	var result = runtime.schemas.submit(entry, args.get("schema"), provenance, bool(args.get("replace", false)), bool(args.get("override", false)))
+	if result.get("ok", false):
+		var progress = runtime.schema_jobs.note_progress(sid, entry["display_name"])
+		if not progress.empty():
+			result["schema_task"] = progress
+	return result
 
 
 func _t_generate_character_schema(args: Dictionary, _sid: String) -> Dictionary:

@@ -54,7 +54,7 @@ Play only: `allow_simulation`, `max_simulations` (per turn), `memory_turns`, `re
 each match, let the model save 1-3 lessons as memories; one short request), `style` (free text such as
 "aggressive rushdown"), `risk` (`cautious`, `balanced` or `reckless`).
 Annotate only: `batch_size` (moves per request), `include_source` and `max_source_chars` (attach code of
-code-driven moves), `auto_generate_missing` (annotate characters without notes when a match starts).
+code-driven moves).
 
 Keys: `ai.providers.<name>.api_key`, or the environment variable in `api_key_env`
 (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`). `ai.providers.local.base_url` points at any
@@ -65,6 +65,10 @@ OpenAI-compatible server (default Ollama, `http://127.0.0.1:11434/v1`).
 | Key | Default | Meaning |
 |---|---|---|
 | `schemas.registry_enabled` / `registry_url` | `false` / `""` | Opt-in community registry (HTTPS). Files are looked up as `<url>/<fingerprint>.json`. |
+| `schemas.auto.enabled` | `true` | Write missing character notes automatically (Characters tab → Automatic notes). |
+| `schemas.auto.workers` | `both` | Who writes them: `both`, `mcp` (a connected chatbot that has claimed a slot) or `api` (the in-game AI with your API key, settings `ai.annotate`). The two work side by side on different characters. |
+| `schemas.auto.when` | `matches` | `matches`: only for the characters of a match. `connect`: every character without notes, when the game boots (API key) and when a chatbot first claims a slot. |
+| `schemas.auto.match_start` | `true` | When a match starts and its character or opponent has no notes, write them first; bots wait for them before their first move (their turn timer waits too). |
 | `source_access.enabled` / `max_file_bytes` | `true` / `200000` | Read-only `res://` access for bots. |
 | `automation.script` | `""` | GDScript with `func run(runtime)` started after boot. |
 | `ui.show_button` / `toggle_key` / `show_on_start` | `true` / `F8` / `false` | Corner button, overlay key, open on start. |

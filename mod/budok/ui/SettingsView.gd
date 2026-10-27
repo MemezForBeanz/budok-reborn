@@ -9,6 +9,8 @@ const Util = preload("res://budok/core/Util.gd")
 const CONTROLLERS := ["human", "mcp", "ai"]
 const PROVIDERS := ["anthropic", "openai", "openrouter", "local"]
 const EFFORTS := ["", "low", "medium", "high", "xhigh", "max"]
+const AUTO_WORKERS := [["both", "Chatbot (MCP) and API key"], ["mcp", "Chatbot (MCP) only"], ["api", "API key only"]]
+const AUTO_WHEN := [["matches", "Only before matches"], ["connect", "On boot (API key) and when a chatbot connects"]]
 const ROLE_FIELDS := [
 	["provider", "Provider", "option", PROVIDERS],
 	["model", "Model", "string"],
@@ -27,6 +29,7 @@ var _messages := []
 var _token_edit: LineEdit = null
 var _char_picker: OptionButton = null
 var _char_status: Label = null
+var _auto_rows := []
 
 
 func _init(runtime_ref) -> void:
@@ -51,6 +54,7 @@ func refresh() -> void:
 			_set_value(field, runtime.config.get_value(path))
 	if Util.valid(_token_edit):
 		_token_edit.text = str(runtime.config.get_value("mcp.auth_token", ""))
+	_on_auto_toggled(bool(runtime.config.get_value("schemas.auto.enabled", true)))
 	refresh_characters()
 	refresh_status()
 
@@ -80,8 +84,12 @@ func refresh_status() -> void:
 		lines.append("AI: %d turns, %d fallbacks, %d/%d tokens in/out" % [auto["turns"], auto["fallbacks"], auto["input_tokens"], auto["output_tokens"]])
 		if auto["last_error"] != "":
 			lines.append("AI last error: " + auto["last_error"])
+	for job in status["schema_jobs"]:
+		if job["status"] in ["queued", "assigned", "running"]:
+			lines.append("Notes for %s: %s%s %s" % [job["character"], job["status"], (" by " + {"mcp": "chatbot", "api": "in-game AI"}.get(job.get("worker", ""), "")) if job.get("worker", "") != "" else "", job.get("progress", "")])
 	for job in status["annotation_jobs"]:
-		lines.append("Schema job %s: %s %s" % [job["character"], job["status"], job["progress"]])
+		if job["status"] == "running":
+			lines.append("In-game AI writing notes for %s: %s" % [job["character"], job["progress"]])
 	_status.text = PoolStringArray(lines).join("\n")
 
 
@@ -143,8 +151,7 @@ func _ai_tab() -> Control:
 			_field(box, prefix + "batch_size", "Moves per batch", "int", [1, 50])
 			_field(box, prefix + "include_source", "Send code of code-driven moves", "bool")
 			_field(box, prefix + "max_source_chars", "Max code characters per move", "int", [500, 50000])
-			_field(box, prefix + "auto_generate_missing", "Auto-generate for characters without notes", "bool")
-	box.add_child(_save_row())
+			box.add_child(_save_row())
 	return _end_tab(box)
 
 
@@ -171,6 +178,16 @@ func _characters_tab() -> Control:
 	_char_status.autowrap = true
 	box.add_child(_char_status)
 	box.add_child(_buttons([["Generate notes with AI", "_on_generate"], ["Export", "_on_export"], ["Refresh", "_on_refresh_characters"], ["Clear memories", "_on_clear_memories"]]))
+	box.add_child(_header("Automatic notes"))
+	_field(box, "schemas.auto.enabled", "Write missing character notes automatically", "bool")
+	_auto_rows = [
+		_field(box, "schemas.auto.workers", "Who writes them", "option", AUTO_WORKERS),
+		_field(box, "schemas.auto.when", "When", "option", AUTO_WHEN),
+		_field(box, "schemas.auto.match_start", "At match start, write notes for both characters if missing (bots wait for them)", "bool"),
+		_hint("A chatbot gets these jobs once it is connected and has claimed a slot; the in-game AI needs an API key (Providers). Both can work at the same time on different characters."),
+	]
+	box.add_child(_auto_rows[3])
+	_fields["schemas.auto.enabled"]["control"].connect("toggled", self, "_on_auto_toggled")
 	_field(box, "schemas.registry_enabled", "Community registry (opt-in)", "bool")
 	_field(box, "schemas.registry_url", "Registry URL (https)", "string")
 	box.add_child(_buttons([["Fetch from registry", "_on_fetch_registry"], ["Save", "_on_save"]]))
@@ -303,6 +320,12 @@ func _on_fetch_registry():
 	_on_character_selected(_char_picker.selected)
 
 
+func _on_auto_toggled(on: bool) -> void:
+	for row in _auto_rows:
+		if Util.valid(row):
+			row.visible = on
+
+
 func _on_clear_memories() -> void:
 	var entry = _selected_entry()
 	if entry == null:
@@ -358,7 +381,7 @@ func _selected_entry():
 
 # --- widgets ---
 
-func _field(box: Control, path: String, label: String, type: String, options = null) -> void:
+func _field(box: Control, path: String, label: String, type: String, options = null) -> Control:
 	var control = null
 	match type:
 		"bool":
@@ -371,8 +394,9 @@ func _field(box: Control, path: String, label: String, type: String, options = n
 			control = OptionButton.new()
 			control.clip_text = true
 			for item in options:
-				control.add_item(item if item != "" else "(default)")
-				control.set_item_metadata(control.get_item_count() - 1, item)
+				var item_value = item[0] if item is Array else item
+				control.add_item(item[1] if item is Array else (item if item != "" else "(default)"))
+				control.set_item_metadata(control.get_item_count() - 1, item_value)
 		"secret":
 			control = LineEdit.new()
 			control.secret = true
@@ -380,7 +404,9 @@ func _field(box: Control, path: String, label: String, type: String, options = n
 		_:
 			control = LineEdit.new()
 	_fields[path] = {"type": type, "control": control}
-	box.add_child(_row(label, control))
+	var row = _row(label, control)
+	box.add_child(row)
+	return row
 
 
 func _set_value(field: Dictionary, value) -> void:

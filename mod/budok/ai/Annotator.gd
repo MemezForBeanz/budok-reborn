@@ -37,7 +37,6 @@ var jobs := {}
 func setup(runtime_ref, llm_ref) -> void:
 	runtime = runtime_ref
 	llm = llm_ref
-	runtime.matches.connect("match_started", self, "_on_match_started")
 
 
 func start(entry: Dictionary, force: bool = false) -> Dictionary:
@@ -57,15 +56,6 @@ func start(entry: Dictionary, force: bool = false) -> Dictionary:
 	emit_signal("job_changed", jobs[key])
 	_run(entry, force)
 	return {"ok": true, "job": jobs[key], "message": "annotation started; poll get_status"}
-
-
-func _on_match_started(info: Dictionary) -> void:
-	if not bool(runtime.config.get_value("ai.annotate.auto_generate_missing", false)):
-		return
-	for slot in ["p1", "p2"]:
-		var entry = info.get("characters", {}).get(slot)
-		if entry is Dictionary and runtime.schemas.describe(entry)["status"] == "missing":
-			start(entry)
 
 
 func _run(entry: Dictionary, force: bool) -> void:

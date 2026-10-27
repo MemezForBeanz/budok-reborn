@@ -33,6 +33,7 @@ client tool timeouts. Supported protocol versions: `2025-06-18`, `2025-03-26` an
 | `introspect_character` | Raw skeleton for writing notes (paged), optionally with the source of code-driven moves. |
 | `submit_character_schema` | Save notes (partial submissions merge). Returns actionable validation errors. |
 | `generate_character_schema` | Let the in-game token-mode model write the notes in the background. |
+| `get_schema_task` / `finish_schema_task` | Automatic notes (`schemas.auto`): the character this session should write notes for next, with instructions and progress; finish early or hand it back (`skipped: true`). Tasks go to a chatbot that has claimed a slot and finish by themselves once every move and the summary have notes. `get_status`, `claim_slot`, `start_match` and idle `wait_for_turn` replies carry the current `schema_task` too. |
 | `export_character_schema` / `fetch_registry_schema` | Share notes, or fetch them from the opt-in registry. |
 | `read_source` / `search_source` / `list_source_files` | Read-only access to `res://` game and mod files. `user://` (where keys live) is never readable. |
 | `get_settings` / `update_setting` | Redacted settings. Changes are limited to controllers, turns, simulation and AI role settings, never keys or URLs. |
@@ -80,5 +81,8 @@ from the opponent, so a reversed lunge travels away from them.
   your states (`auto_continued`), for example while frozen by a time stop.
 - `start_match` and the first turn of a match include `memories`: lessons bots saved about these
   characters before.
+- With automatic notes on (the default), a match whose characters have no notes holds the bots' first
+  move: `wait_for_turn` returns `status: "schema_task"` when the job is yours (write the notes, then call it
+  again), or `status: "waiting", reason: "notes"` while the in-game AI writes them.
 - Timeouts (`turns.timeout_s.mcp`, default off) play `turns.fallback_action`.
 - If the human plays a bot's unclaimed slot from the UI, the turn closes as `resolved_elsewhere`.
