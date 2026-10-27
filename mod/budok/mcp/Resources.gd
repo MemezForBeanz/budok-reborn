@@ -78,6 +78,9 @@ func prompts() -> Array:
 		{"name": "annotate_character", "title": "Write a character schema",
 			"description": "Guided workflow for writing notes for a (modded) character.",
 			"arguments": [{"name": "character", "description": "Character name", "required": true}]},
+		{"name": "notes_worker", "title": "Write character notes in the background",
+			"description": "Run this in a separate chat: it works through budok's queue of characters without notes, so the chat that plays never has to.",
+			"arguments": []},
 		{"name": "modding_help", "title": "YOMI modding help",
 			"description": "Engine and modding conventions primer, for questions about game or mod code.",
 			"arguments": [{"name": "question", "description": "What you want to know", "required": false}]},
@@ -98,6 +101,8 @@ func get_prompt(name: String, args) -> Dictionary:
 			if character == "":
 				return {"ok": false, "error": "argument 'character' is required"}
 			return _prompt("Annotate %s" % character, Prompts.annotate_prompt(character))
+		"notes_worker":
+			return _prompt("budok notes writer", Prompts.notes_worker_prompt())
 		"modding_help":
 			var text = PoolStringArray([Prompts.knowledge("engine"), Prompts.knowledge("modding"), Prompts.knowledge("characters"),
 				"Use search_source / read_source to look at the actual game and mod code before answering.",

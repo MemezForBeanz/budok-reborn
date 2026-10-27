@@ -18,6 +18,10 @@ YOMI Hustle process
    ├─ core/SchemaStore      notes lookup (override → mod-shipped → bundled → generated → registry),
    │                        validation and merging
    ├─ core/SourceBrowser    read-only res:// access
+   ├─ core/Memory           lessons bots saved between matches (user://budok/memory)
+   ├─ core/SchemaJobs       automatic notes: queue of characters without notes, handed to the
+   │    │                   in-game AI and to notes agents; holds a match's first turn for them
+   │    └─ NotesAgent        starts Claude Code headless (claude -p) as the notes agent
    ├─ mcp/HttpServer        TCP_Server-based HTTP/1.1, polled on the main thread, deferred responses
    ├─ mcp/McpServer         JSON-RPC, sessions, auth, origin checks; mcp/Tools + mcp/Resources
    ├─ ai/LlmClient          Anthropic Messages API / OpenAI-compatible chat via HTTPRequest

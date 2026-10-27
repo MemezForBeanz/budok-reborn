@@ -33,7 +33,7 @@ client tool timeouts. Supported protocol versions: `2025-06-18`, `2025-03-26` an
 | `introspect_character` | Raw skeleton for writing notes (paged), optionally with the source of code-driven moves. |
 | `submit_character_schema` | Save notes (partial submissions merge). Returns actionable validation errors. |
 | `generate_character_schema` | Let the in-game token-mode model write the notes in the background. |
-| `get_schema_task` / `finish_schema_task` | Automatic notes (`schemas.auto`): the character this session should write notes for next, with instructions and progress; finish early or hand it back (`skipped: true`). Tasks go to a chatbot that has claimed a slot and finish by themselves once every move and the summary have notes. `get_status`, `claim_slot`, `start_match` and idle `wait_for_turn` replies carry the current `schema_task` too. |
+| `get_schema_task` / `finish_schema_task` | Automatic notes (`schemas.auto`): the character to write notes for next, with instructions and progress; finish early or hand it back (`skipped: true`). Tasks go to notes agents, which ask with `worker: true` (and can wait for the next character with `wait_s`), not to the chatbot that plays, unless `schemas.auto.use_player` is on and no notes agent is available. Tasks finish by themselves once every move and the summary have notes. While a match's characters get their notes, its bots' `wait_for_turn` returns `status: waiting, reason: notes`. |
 | `export_character_schema` / `fetch_registry_schema` | Share notes, or fetch them from the opt-in registry. |
 | `read_source` / `search_source` / `list_source_files` | Read-only access to `res://` game and mod files. `user://` (where keys live) is never readable. |
 | `get_settings` / `update_setting` | Redacted settings. Changes are limited to controllers, turns, simulation and AI role settings, never keys or URLs. |
@@ -69,7 +69,7 @@ from the opponent, so a reversed lunge travels away from them.
 - `yomi://schema/format`: JSON Schema of the notes format.
 - `yomi://characters/{name}/schema` and `.../skeleton`: per-character data.
 - `yomi://match/log`: the current match.
-- Prompts: `play_match {slot}`, `annotate_character {character}` and `modding_help {question}`.
+- Prompts: `play_match {slot}`, `annotate_character {character}`, `notes_worker` (run it in a second chat to make that chat a notes agent; it waits for characters without notes and writes them) and `modding_help {question}`.
 
 ## Turn rules worth knowing
 

@@ -68,7 +68,11 @@
     "registry_url": "",
     "auto": {
       "enabled": true,
-      "workers": "both",
+      "use_agent": true,
+      "use_api": true,
+      "use_player": false,
+      "agent_command": "claude",
+      "agent_model": "",
       "when": "matches",
       "match_start": true
     }

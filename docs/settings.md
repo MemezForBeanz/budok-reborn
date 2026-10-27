@@ -66,8 +66,12 @@ OpenAI-compatible server (default Ollama, `http://127.0.0.1:11434/v1`).
 |---|---|---|
 | `schemas.registry_enabled` / `registry_url` | `false` / `""` | Opt-in community registry (HTTPS). Files are looked up as `<url>/<fingerprint>.json`. |
 | `schemas.auto.enabled` | `true` | Write missing character notes automatically (Characters tab → Automatic notes). |
-| `schemas.auto.workers` | `both` | Who writes them: `both`, `mcp` (a connected chatbot that has claimed a slot) or `api` (the in-game AI with your API key, settings `ai.annotate`). The two work side by side on different characters. |
-| `schemas.auto.when` | `matches` | `matches`: only for the characters of a match. `connect`: every character without notes, when the game boots (API key) and when a chatbot first claims a slot. |
+| `schemas.auto.use_agent` | `true` | A separate notes agent writes them, in its own context: budok starts Claude Code in the background (`claude -p`, with your Claude login, only budok's notes tools allowed, output in `user://budok/agent/agent.log`) and it exits when the queue is empty. A second chat running the `notes_worker` prompt counts as a notes agent too, and budok then starts none. |
+| `schemas.auto.agent_command` | `claude` | The Claude Code command or its full path. budok also looks in the usual install folders (`~/.local/bin`, npm's global folder, Homebrew), since a game started by Steam may not see your shell's `PATH`. Not changeable over MCP. |
+| `schemas.auto.agent_model` | `""` | Model for the notes agent (`--model`); empty uses Claude Code's default. |
+| `schemas.auto.use_api` | `true` | The in-game AI writes them with your API key (settings `ai.annotate`), side by side with the notes agent. |
+| `schemas.auto.use_player` | `false` | Hand jobs to the chatbot that is playing, before its first move, but only when no notes agent is available. |
+| `schemas.auto.when` | `matches` | `matches`: only for the characters of a match. `connect`: every character without notes, when the game boots and when a chatbot first claims a slot. |
 | `schemas.auto.match_start` | `true` | When a match starts and its character or opponent has no notes, write them first; bots wait for them before their first move (their turn timer waits too). |
 | `source_access.enabled` / `max_file_bytes` | `true` / `200000` | Read-only `res://` access for bots. |
 | `automation.script` | `""` | GDScript with `func run(runtime)` started after boot. |

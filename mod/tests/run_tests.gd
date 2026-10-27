@@ -12,6 +12,7 @@ const HttpServer = preload("res://budok/mcp/HttpServer.gd")
 const Tools = preload("res://budok/mcp/Tools.gd")
 const Prompts = preload("res://budok/ai/Prompts.gd")
 const Memory = preload("res://budok/core/Memory.gd")
+const NotesAgent = preload("res://budok/core/NotesAgent.gd")
 
 var failures := 0
 var checks := 0
@@ -27,6 +28,7 @@ func _init() -> void:
 	_test_tool_catalogue()
 	_test_knowledge()
 	_test_memory()
+	_test_notes_agent()
 	print("%d checks, %d failures" % [checks, failures])
 	quit(failures)
 
@@ -261,6 +263,18 @@ func _test_memory() -> void:
 	check(memory.recall(["Yan"], "note").size() == 2, "oldest memories drop past the limit")
 	check(memory.clear_for("Yan") >= 2 and memory.count_for("Yan") == 0, "clear deletes a character's memories")
 	memory.clear_for("Zed")
+
+
+func _test_notes_agent() -> void:
+	check(NotesAgent.resolve("/nonexistent/claude") == "", "a missing agent command is reported as not found")
+	check(NotesAgent.resolve(OS.get_executable_path()) == OS.get_executable_path(), "a full agent path is used as is")
+	var tools = Tools.new(null)
+	var allowed = true
+	for tool_name in NotesAgent.TOOLS:
+		allowed = allowed and tools.has_method("_t_" + tool_name) and not (tool_name in ["start_match", "submit_action", "claim_slot", "update_setting", "forget"])
+	check(allowed, "the notes agent may only use existing notes tools")
+	check(Prompts.notes_worker_prompt(true).find("you are done: stop") != -1, "the headless notes agent stops when the queue is empty")
+	check(Prompts.notes_worker_prompt().find("wait_s") != -1, "a notes chat waits for the next character")
 
 
 func _test_http_parsing() -> void:

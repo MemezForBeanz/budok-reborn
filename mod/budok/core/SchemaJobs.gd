@@ -1,28 +1,40 @@
 extends Node
 
 # Automatic character notes. One queue of characters without notes, fed by
-# triggers and drained by two separate workers that only write schemas:
-#   mcp - the connected chatbot that has claimed a slot is handed the job
-#         (get_schema_task, or in place of its first turn for match jobs) and
-#         writes the notes with its own tools.
-#   api - the in-game AI (ai.annotate, needs an API key) writes them in the
-#         background through ai/Annotator.gd.
-# Both take jobs from the same queue, so they can work on two characters at
-# once. Triggers (settings schemas.auto.*):
+# triggers and drained by workers that only write schemas, each in its own
+# context, so the chatbot that is playing does not have to:
+#   agent  - a separate notes agent: a headless Claude Code agent that budok
+#            starts itself (core/NotesAgent.gd) and that exits when the queue
+#            is empty, or any MCP session that asks for work with
+#            get_schema_task {"worker": true} (a second chat running the
+#            notes_worker prompt).
+#   api    - the in-game AI (ai.annotate, needs an API key), in the background.
+#   player - only if allowed: the chatbot that is playing, before its first
+#            move, and only when no notes agent can do it.
+# Triggers (settings schemas.auto.*):
 #   match_start - a match starts and its character or opponent has no notes:
 #                 they go to the front, and bots wait for them before playing.
-#   when=connect - every character without notes, when the game boots (API
-#                 worker) and when a chatbot first claims a slot (MCP worker).
+#   when=connect - every character without notes, when the game boots and when
+#                 a chatbot first claims a slot.
 
 signal changed()
 
 const Util = preload("res://budok/core/Util.gd")
+const NotesAgent = preload("res://budok/core/NotesAgent.gd")
 const CHECK_INTERVAL := 1.0
 const SESSION_IDLE_MS := 120000
+const AGENT_CONNECT_MS := 60000
+const AGENT_RETRY_MS := 600000
+# A job whose worker went away this many times is kept as it is (partial notes).
+const MAX_ATTEMPTS := 2
 const OPEN := ["queued", "assigned", "running"]
 
 var runtime = null
 var jobs := []
+var _workers := {}
+var _agent := {}
+var _agent_error := ""
+var _agent_retry_at := 0
 var _seen_sessions := {}
 var _boot_swept := false
 var _timer := 0.0
@@ -43,16 +55,29 @@ func enabled() -> bool:
 
 
 func api_available() -> bool:
-	return str(setting("workers", "both")) in ["both", "api"] and bool(runtime.llm.describe_role("annotate").get("has_key", false))
+	return bool(setting("use_api", true)) and bool(runtime.llm.describe_role("annotate").get("has_key", false))
 
 
-func mcp_available() -> bool:
-	if not (str(setting("workers", "both")) in ["both", "mcp"]):
+# A notes agent is working, starting, or could be started.
+func agent_available() -> bool:
+	if not bool(setting("use_agent", true)):
+		return false
+	if _worker_alive() or not _agent.empty():
+		return true
+	return Util.now_ms() >= _agent_retry_at and NotesAgent.resolve(str(setting("agent_command", "claude"))) != ""
+
+
+func player_available() -> bool:
+	if not bool(setting("use_player", false)):
 		return false
 	for slot in ["p1", "p2"]:
 		if _session_alive(runtime.matches.owners.get(slot, "")):
 			return true
 	return false
+
+
+func writer_available() -> bool:
+	return api_available() or agent_available() or player_available()
 
 
 # --- triggers ---
@@ -72,7 +97,7 @@ func on_claimed(session_id: String) -> void:
 	if session_id == "" or _seen_sessions.has(session_id):
 		return
 	_seen_sessions[session_id] = true
-	if enabled() and str(setting("when", "matches")) == "connect" and str(setting("workers", "both")) in ["both", "mcp"]:
+	if enabled() and str(setting("when", "matches")) == "connect":
 		sweep("connect")
 
 
@@ -100,7 +125,7 @@ func enqueue(entry: Dictionary, reason: String) -> bool:
 			jobs.erase(job)
 			break
 	var job = {"name": entry["name"], "character": entry["display_name"], "reason": reason, "status": "queued",
-		"worker": "", "session": "", "progress": "", "note": ""}
+		"worker": "", "session": "", "progress": "", "note": "", "attempts": 0}
 	if reason == "match":
 		jobs.push_front(job)
 	else:
@@ -118,11 +143,12 @@ func _process(delta: float) -> void:
 	_timer = 0.0
 	if not enabled():
 		return
-	if not _boot_swept and str(setting("when", "matches")) == "connect" and api_available() and _roster_ready():
+	if not _boot_swept and str(setting("when", "matches")) == "connect" and (api_available() or agent_available()) and _roster_ready():
 		_boot_swept = true
 		sweep("boot")
 	_requeue_abandoned()
 	_run_api_worker()
+	_run_agent()
 
 
 func _run_api_worker() -> void:
@@ -151,6 +177,48 @@ func _run_api_worker() -> void:
 		return
 
 
+# Starts the headless notes agent when there is queued work and no notes agent
+# is around, and keeps an eye on the one it started.
+func _run_agent() -> void:
+	if not _agent.empty():
+		var running = OS.is_process_running(int(_agent["pid"]))
+		if not _agent["sessions"].empty() and running:
+			return
+		if _agent["sessions"].empty() and running and Util.now_ms() - int(_agent["started_ms"]) <= AGENT_CONNECT_MS:
+			return
+		if running:
+			NotesAgent.stop(int(_agent["pid"]))
+		if _agent["sessions"].empty():
+			_agent_error = "the notes agent %s; see %s" % ["did not connect to budok within a minute" if running else "stopped before it connected to budok", _agent["log"]]
+			_agent_retry_at = Util.now_ms() + AGENT_RETRY_MS
+		# Its sessions end with it, so their jobs go back to the queue now.
+		for session_id in _agent["sessions"]:
+			_workers.erase(session_id)
+		_agent = {}
+		_requeue_abandoned()
+		emit_signal("changed")
+		return
+	if not bool(setting("use_agent", true)) or _worker_alive() or Util.now_ms() < _agent_retry_at:
+		return
+	var waiting = false
+	for job in jobs:
+		if job["status"] == "queued" and not _defer(job):
+			waiting = true
+			break
+	if not waiting:
+		return
+	var started = NotesAgent.spawn(runtime)
+	if not started["ok"]:
+		_agent_error = started["error"]
+		_agent_retry_at = Util.now_ms() + AGENT_RETRY_MS
+		emit_signal("changed")
+		return
+	_agent = {"pid": started["pid"], "started_ms": Util.now_ms(), "log": started["log"], "sessions": {}}
+	_agent_error = ""
+	print("budok: started a notes agent (%s, pid %d)" % [started["command"], started["pid"]])
+	emit_signal("changed")
+
+
 func _on_annotator_job(annotator_job: Dictionary) -> void:
 	for job in jobs:
 		if job["character"] == annotator_job.get("character") and job["worker"] == "api" and job["status"] == "running":
@@ -165,15 +233,26 @@ func _on_annotator_job(annotator_job: Dictionary) -> void:
 			emit_signal("changed")
 
 
-# The task for an MCP session: its assigned job, or the next queued one. Only
-# sessions that have claimed a slot get tasks.
-func task_for(session_id: String, match_only: bool = false) -> Dictionary:
-	if not enabled() or not (str(setting("workers", "both")) in ["both", "mcp"]) or not _owns_slot(session_id):
+# The task for an MCP session: its assigned job, or the next queued one.
+# Notes workers (as_worker, or sessions that asked as one before) get any job;
+# a playing chatbot only when use_player is on and no notes agent can do it.
+func task_for(session_id: String, match_only: bool = false, as_worker: bool = false) -> Dictionary:
+	if not enabled() or session_id == "":
+		return {}
+	var worker = as_worker or _workers.has(session_id)
+	if worker:
+		if not bool(setting("use_agent", true)):
+			return {}
+		# Worker sessions that appear while the agent runs are taken to be its own.
+		if not _agent.empty() and not _workers.has(session_id):
+			_agent["sessions"][session_id] = true
+		_workers[session_id] = true
+	elif not (bool(setting("use_player", false)) and _owns_slot(session_id)) or agent_available():
 		return {}
 	for job in jobs:
 		if job["status"] == "assigned" and job["session"] == session_id:
 			if _check_complete(job):
-				return task_for(session_id, match_only)
+				return task_for(session_id, match_only, as_worker)
 			if match_only and job["reason"] != "match":
 				return {}
 			return _task_view(job)
@@ -183,11 +262,16 @@ func task_for(session_id: String, match_only: bool = false) -> Dictionary:
 		if _ready_entry(job) == null:
 			continue
 		job["status"] = "assigned"
-		job["worker"] = "mcp"
+		job["worker"] = "agent" if worker else "player"
 		job["session"] = session_id
+		job["attempts"] += 1
 		emit_signal("changed")
 		return _task_view(job)
 	return {}
+
+
+func is_worker(session_id: String) -> bool:
+	return _workers.has(session_id)
 
 
 # After a notes submission: finishes the session's job when the notes are complete.
@@ -205,7 +289,7 @@ func finish_task(session_id: String, character: String, skipped: bool) -> Dictio
 	for job in jobs:
 		if job["status"] == "assigned" and job["session"] == session_id and (character == "" or job["character"] == character):
 			if skipped:
-				_finish(job, "skipped", "handed back by the chatbot")
+				_finish(job, "skipped", "handed back")
 			else:
 				var coverage = _coverage(job)
 				_finish(job, "done" if coverage.get("complete", false) else "partial", coverage.get("text", ""))
@@ -229,7 +313,7 @@ func blocking_job() -> Dictionary:
 	for job in jobs:
 		if job["reason"] != "match" or not (job["name"] in names) or not (job["status"] in OPEN):
 			continue
-		if job["status"] == "queued" and not api_available() and not mcp_available():
+		if job["status"] == "queued" and not writer_available():
 			continue
 		return job
 	return {}
@@ -250,6 +334,18 @@ func summary() -> Array:
 	return out
 
 
+func agent_status() -> Dictionary:
+	if not _agent.empty():
+		return {"state": "starting" if _agent["sessions"].empty() else "working", "log": _agent["log"]}
+	if _worker_alive():
+		return {"state": "a notes worker chat is connected"}
+	if _agent_error != "":
+		return {"state": "error", "error": _agent_error}
+	if bool(setting("use_agent", true)) and NotesAgent.resolve(str(setting("agent_command", "claude"))) == "":
+		return {"state": "unavailable", "error": NotesAgent.NOT_FOUND}
+	return {"state": "idle"}
+
+
 # --- helpers ---
 
 # Loading a character can stutter the game, so characters that are not loaded
@@ -259,6 +355,7 @@ func _defer(job: Dictionary) -> bool:
 		return false
 	var entry = runtime.roster.resolve(job["name"])
 	return entry == null or not entry["loaded"]
+
 
 func _missing(entry: Dictionary) -> bool:
 	return runtime.schemas.describe(entry)["status"] == "missing"
@@ -315,7 +412,7 @@ func _task_view(job: Dictionary) -> Dictionary:
 		"moves_left": missing.slice(0, 19) if missing.size() > 20 else missing,
 		"instructions": ("Write budok notes for %s: introspect_character {\"character\": \"%s\"} (page with offset/limit), read_source for moves marked dynamic, "
 			+ "then submit_character_schema in batches (moves first, then summary and resources). The annotate_character prompt and yomi://knowledge/annotating "
-			+ "explain the format. The task finishes by itself once every move and the summary have notes; finish_schema_task ends it early (skipped: true hands it back).") % [
+			+ "explain the format. The task finishes by itself once every move and the summary have notes; then ask get_schema_task again.") % [
 			job["character"], job["character"]],
 	}
 
@@ -327,13 +424,32 @@ func _finish(job: Dictionary, status: String, note: String) -> void:
 	emit_signal("changed")
 
 
+func _exit_tree() -> void:
+	if not _agent.empty() and OS.is_process_running(int(_agent["pid"])):
+		NotesAgent.stop(int(_agent["pid"]))
+
+
 func _requeue_abandoned() -> void:
+	for session_id in _workers.keys():
+		if not _session_alive(session_id):
+			_workers.erase(session_id)
 	for job in jobs:
-		if job["status"] == "assigned" and not _session_alive(job["session"]):
+		if job["status"] == "assigned" and not (_session_alive(job["session"]) and (_workers.has(job["session"]) or job["worker"] == "player")):
+			if job["attempts"] >= MAX_ATTEMPTS:
+				var coverage = _coverage(job)
+				_finish(job, "partial", "its writers stopped %d times (%s)" % [job["attempts"], coverage.get("text", "")])
+				continue
 			job["status"] = "queued"
 			job["worker"] = ""
 			job["session"] = ""
 			emit_signal("changed")
+
+
+func _worker_alive() -> bool:
+	for session_id in _workers:
+		if _session_alive(session_id):
+			return true
+	return false
 
 
 func _owns_slot(session_id: String) -> bool:

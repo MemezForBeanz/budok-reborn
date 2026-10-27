@@ -81,10 +81,13 @@ what it beats, when to use it):
    skeleton and the character's code (`introspect_character`, `read_source`) and saves notes with
    `submit_character_schema`.
 3. **Generated in token mode**: the **Characters** tab → *Generate with AI*.
-4. **Automatically** (on by default): when a match starts with a character that has no notes, the
-   connected chatbot (once it has claimed a slot) or the in-game AI (with an API key) writes them before
-   the bots play. Characters tab → *Automatic notes* picks who does it and when (before matches, or for
-   every character on boot and when a chatbot connects).
+4. **Automatically** (on by default): when a match starts with a character that has no notes, a separate
+   **notes agent** writes them before the bots play, in its own context, so the chat that plays never has
+   to. If [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is installed, budok starts it in
+   the background with your Claude login (only budok's notes tools allowed) and it exits when it is done.
+   Without Claude Code, open a second chat with the `notes_worker` prompt and leave it waiting. The
+   in-game AI (with an API key) can work alongside. Characters tab → *Automatic notes* picks who does it
+   and when (before matches, or for every character on boot and when a chatbot connects).
 5. **Community registry** (opt-in): fetch notes other players published for the exact same character build.
 
 Vanilla characters ship with curated notes. Bots also get a knowledge pack about the engine and modding

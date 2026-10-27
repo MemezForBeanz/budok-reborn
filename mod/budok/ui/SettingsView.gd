@@ -9,8 +9,7 @@ const Util = preload("res://budok/core/Util.gd")
 const CONTROLLERS := ["human", "mcp", "ai"]
 const PROVIDERS := ["anthropic", "openai", "openrouter", "local"]
 const EFFORTS := ["", "low", "medium", "high", "xhigh", "max"]
-const AUTO_WORKERS := [["both", "Chatbot (MCP) and API key"], ["mcp", "Chatbot (MCP) only"], ["api", "API key only"]]
-const AUTO_WHEN := [["matches", "Only before matches"], ["connect", "On boot (API key) and when a chatbot connects"]]
+const AUTO_WHEN := [["matches", "Only before matches"], ["connect", "On boot and when a chatbot connects"]]
 const ROLE_FIELDS := [
 	["provider", "Provider", "option", PROVIDERS],
 	["model", "Model", "string"],
@@ -84,9 +83,12 @@ func refresh_status() -> void:
 		lines.append("AI: %d turns, %d fallbacks, %d/%d tokens in/out" % [auto["turns"], auto["fallbacks"], auto["input_tokens"], auto["output_tokens"]])
 		if auto["last_error"] != "":
 			lines.append("AI last error: " + auto["last_error"])
+	var agent = status.get("notes_agent", {})
+	if agent.get("state", "idle") != "idle":
+		lines.append("Notes agent: %s%s" % [agent["state"], (": " + agent["error"]) if agent.has("error") else ""])
 	for job in status["schema_jobs"]:
 		if job["status"] in ["queued", "assigned", "running"]:
-			lines.append("Notes for %s: %s%s %s" % [job["character"], job["status"], (" by " + {"mcp": "chatbot", "api": "in-game AI"}.get(job.get("worker", ""), "")) if job.get("worker", "") != "" else "", job.get("progress", "")])
+			lines.append("Notes for %s: %s%s %s" % [job["character"], job["status"], (" by " + {"agent": "notes agent", "player": "playing chatbot", "api": "in-game AI"}.get(job.get("worker", ""), "")) if job.get("worker", "") != "" else "", job.get("progress", "")])
 	for job in status["annotation_jobs"]:
 		if job["status"] == "running":
 			lines.append("In-game AI writing notes for %s: %s" % [job["character"], job["progress"]])
@@ -181,12 +183,17 @@ func _characters_tab() -> Control:
 	box.add_child(_header("Automatic notes"))
 	_field(box, "schemas.auto.enabled", "Write missing character notes automatically", "bool")
 	_auto_rows = [
-		_field(box, "schemas.auto.workers", "Who writes them", "option", AUTO_WORKERS),
 		_field(box, "schemas.auto.when", "When", "option", AUTO_WHEN),
 		_field(box, "schemas.auto.match_start", "At match start, write notes for both characters if missing (bots wait for them)", "bool"),
-		_hint("A chatbot gets these jobs once it is connected and has claimed a slot; the in-game AI needs an API key (Providers). Both can work at the same time on different characters."),
+		_field(box, "schemas.auto.use_agent", "Separate notes agent (its own context)", "bool"),
+		_field(box, "schemas.auto.agent_command", "Claude Code command for it", "string"),
+		_field(box, "schemas.auto.agent_model", "Agent model (empty = Claude Code default)", "string"),
+		_field(box, "schemas.auto.use_api", "In-game AI with your API key", "bool"),
+		_field(box, "schemas.auto.use_player", "The chatbot that is playing (only if no notes agent is available)", "bool"),
+		_hint("The notes agent is Claude Code, which budok starts in the background with your Claude login (install it first), or a second chat you open "
+			+ "with budok's notes_worker prompt. Either has its own context, so the chat that plays never writes notes. The in-game AI needs an API key (Providers)."),
 	]
-	box.add_child(_auto_rows[3])
+	box.add_child(_auto_rows[_auto_rows.size() - 1])
 	_fields["schemas.auto.enabled"]["control"].connect("toggled", self, "_on_auto_toggled")
 	_field(box, "schemas.registry_enabled", "Community registry (opt-in)", "bool")
 	_field(box, "schemas.registry_url", "Registry URL (https)", "string")

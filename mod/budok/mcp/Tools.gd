@@ -8,7 +8,8 @@ extends Reference
 const Util = preload("res://budok/core/Util.gd")
 const MatchStarter = preload("res://budok/core/MatchStarter.gd")
 const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", "ai.annotate.", "schemas.auto."]
-const SETTING_BLOCKLIST := ["api_key", "base_url", "auth_token"]
+# agent_command names a program budok runs, so only the player may set it.
+const SETTING_BLOCKLIST := ["api_key", "base_url", "auth_token", "agent_command"]
 const SESSION_TAKEOVER_MS := 120000
 
 var runtime = null
@@ -113,7 +114,11 @@ func _define() -> void:
 		"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "only_mine": {"type": "boolean", "description": "Only memories written by this client."}}, [], true)
 	_add("forget", "Forget", "Delete one memory by its id (from recall).", {"id": {"type": "string"}}, ["id"])
 	_add("get_settings", "Get settings", "Current budok settings (secrets redacted).", {}, [], true)
-	_add("get_schema_task", "Get schema task", "Automatic notes: the character this session should write notes for next (budok hands them to a chatbot that has claimed a slot), with instructions and progress. null when there is nothing to do.", {}, [], true)
+	_add("get_schema_task", "Get schema task", "Automatic notes: the next character to write notes for, with instructions and progress; null when there is nothing to do. "
+		+ "Pass worker: true when this session is a notes writer (the notes_worker prompt): it then gets every queued character, without claiming a slot. "
+		+ "Workers can wait for the next character with wait_s.",
+		{"worker": {"type": "boolean"}, "wait_s": {"type": "number", "minimum": 0, "maximum": 50,
+			"description": "Workers only: wait up to this long for a character to come up (default 0, capped by mcp.max_wait_s)."}}, [], true)
 	_add("finish_schema_task", "Finish schema task", "End your schema task early: done, or skipped: true to hand it back. Tasks also finish by themselves once every move and the summary have notes.",
 		{"character": {"type": "string"}, "skipped": {"type": "boolean"}}, [])
 	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.*, ai.annotate.* or schemas.auto.* (no keys or URLs).",
@@ -143,11 +148,19 @@ func _t_get_status(_args: Dictionary, sid: String) -> Dictionary:
 	return status
 
 
-func _t_get_schema_task(_args: Dictionary, sid: String) -> Dictionary:
-	if runtime.matches.slots_of(sid).empty():
-		return {"ok": true, "task": null, "message": "schema tasks go to a chatbot that has claimed a slot (claim_slot or start_match)", "queue": runtime.schema_jobs.summary()}
-	var task = runtime.schema_jobs.task_for(sid)
-	return {"ok": true, "task": task if not task.empty() else null, "queue": runtime.schema_jobs.summary()}
+func _t_get_schema_task(args: Dictionary, sid: String):
+	var worker = bool(args.get("worker", false))
+	var task = runtime.schema_jobs.task_for(sid, false, worker)
+	if task.empty() and (worker or runtime.schema_jobs.is_worker(sid)):
+		var max_wait = float(runtime.config.get_value("mcp.max_wait_s", 25))
+		var deadline = Util.now_ms() + int(clamp(float(args.get("wait_s", 0)), 0.0, max_wait) * 1000.0)
+		while task.empty() and Util.now_ms() < deadline:
+			yield(runtime.get_tree().create_timer(0.5), "timeout")
+			task = runtime.schema_jobs.task_for(sid)
+	var out = {"ok": true, "task": task if not task.empty() else null, "queue": runtime.schema_jobs.summary()}
+	if task.empty() and not worker and not runtime.schema_jobs.is_worker(sid):
+		out["message"] = "Notes are written by a separate notes agent (or the in-game AI), not by the chatbot that plays. To be a notes writer, call get_schema_task with worker: true."
+	return out
 
 
 func _t_finish_schema_task(args: Dictionary, sid: String) -> Dictionary:
@@ -176,8 +189,9 @@ func _hold_for_notes(sid: String, timeout_s: float):
 				"message": "Before playing, write notes for %s (automatic notes are on); your first turn waits for them. Then call wait_for_turn again." % task["character"]}
 		if Util.now_ms() >= deadline:
 			return {"ok": true, "status": "waiting", "reason": "notes",
-				"message": "%s is writing notes for %s (%s); the match continues once they are saved. Call wait_for_turn again." % [
-					"The in-game AI" if job["worker"] == "api" else "Another chatbot", job["character"], job.get("progress", "")]}
+				"message": "%s is writing notes for %s%s; your first move comes once they are saved. Call wait_for_turn again." % [
+					{"api": "The in-game AI", "agent": "A notes agent", "player": "Another chatbot"}.get(job["worker"], "A notes agent (starting)"),
+					job["character"], (" (%s)" % job["progress"]) if str(job.get("progress", "")) != "" else ""]}
 		yield(runtime.get_tree().create_timer(0.25), "timeout")
 	return {}
 
@@ -235,9 +249,22 @@ func _add_notes_hint(result: Dictionary) -> void:
 	if missing.empty():
 		return
 	result["notes_missing"] = missing
-	result["notes_hint"] = ("%s %s no move notes yet, so you only get measured frame data for %s. For better play, write them first: run the annotate_character prompt "
-		+ "(introspect_character, read_source, submit_character_schema), or call generate_character_schema to let the in-game AI do it. Otherwise simulate more.") % [
-		PoolStringArray(missing).join(" and "), "has" if missing.size() == 1 else "have", "it" if missing.size() == 1 else "them"]
+	var names = PoolStringArray(missing).join(" and ")
+	var jobs = runtime.schema_jobs
+	if jobs.holding():
+		result["notes_hint"] = "Notes for %s are being written in the background; your first turn waits for them." % names
+	elif jobs.enabled() and bool(jobs.setting("match_start", true)) and not bool(jobs.setting("use_player", false)):
+		if jobs.writer_available():
+			result["notes_hint"] = "%s %s no move notes yet (the notes writer did not finish them), so you only get measured frame data. Simulate more." % [
+				names, "has" if missing.size() == 1 else "have"]
+		else:
+			result["notes_hint"] = ("%s %s no move notes yet and no notes writer is available, so you only get measured frame data. Tell the user once: "
+				+ "install Claude Code (budok then starts a notes agent by itself), open a second chat with budok's notes_worker prompt, or add an API key "
+				+ "(budok settings → Providers). Meanwhile, simulate more.") % [names, "has" if missing.size() == 1 else "have"]
+	else:
+		result["notes_hint"] = ("%s %s no move notes yet, so you only get measured frame data for %s. For better play, write them first: run the annotate_character prompt "
+			+ "(introspect_character, read_source, submit_character_schema), or call generate_character_schema to let the in-game AI do it. Otherwise simulate more.") % [
+			names, "has" if missing.size() == 1 else "have", "it" if missing.size() == 1 else "them"]
 
 
 func _add_memories(result: Dictionary) -> void:

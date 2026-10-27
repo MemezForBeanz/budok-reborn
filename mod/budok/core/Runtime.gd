@@ -132,6 +132,7 @@ func status() -> Dictionary:
 		},
 		"annotation_jobs": annotator.jobs.values(),
 		"schema_jobs": schema_jobs.summary(),
+		"notes_agent": schema_jobs.agent_status(),
 	}
 
 

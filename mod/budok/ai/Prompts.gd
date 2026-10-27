@@ -104,6 +104,25 @@ static func play_match_prompt(runtime, slot: String) -> String:
 	]).join("\n")
 
 
+# For a notes agent with its own context: the headless Claude Code agent budok
+# starts, or a second chat running the notes_worker prompt.
+# headless: budok started this agent itself (core/NotesAgent.gd) and it stops
+# when the queue is empty; otherwise it is a chat the player opened for it,
+# which waits for the next character instead.
+static func notes_worker_prompt(headless: bool = false) -> String:
+	var idle = ("If its task is null, you are done: stop." if headless
+		else "If its task is null, call get_schema_task {\"worker\": true, \"wait_s\": 25} again to wait for the next character (one comes up when a match starts with a character without notes); after 20 empty waits in a row, say so and stop.")
+	return PoolStringArray([
+		"You are budok's notes writer for YOMI Hustle. This is a background job: %s another bot is playing the game. Do not start or play matches." % (
+			"nobody is chatting with you, and" if headless else "the user opened this chat for it, and"),
+		"Loop: call get_schema_task with {\"worker\": true}. " + idle + " Otherwise write notes for task.character as its instructions say: introspect_character (page with offset/limit), "
+			+ "read_source for moves marked dynamic, then submit_character_schema in batches of 10-20 moves, and finally the summary and resources. "
+			+ "Fix any validation errors and resubmit. The task finishes by itself once every move and the summary have notes; then call get_schema_task again.",
+		"Work quickly and keep each note short and concrete. Do not explain your work in prose.",
+		annotate_system(),
+	]).join("\n\n")
+
+
 static func annotate_prompt(character: String) -> String:
 	return PoolStringArray([
 		annotate_system(),
