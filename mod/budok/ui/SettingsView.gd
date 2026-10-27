@@ -98,6 +98,7 @@ func _connect_tab() -> Control:
 	box.add_child(_row("Token", _token_edit))
 	box.add_child(_buttons([["Show / hide token", "_on_show_token"], ["Copy URL + token", "_on_copy_url"], ["New token", "_on_new_token"]]))
 	box.add_child(_buttons([["Copy Claude Code command", "_on_copy_code"], ["Copy Claude Desktop config", "_on_copy_desktop"]]))
+	box.add_child(_buttons([["Copy Claude Desktop config (Node.js / mcp-remote)", "_on_copy_desktop_node"]]))
 	box.add_child(_hint("Point any MCP client at the URL with the token (Authorization: Bearer <token>, or ?token=). Web chatbots need a public HTTPS tunnel to this port; keep the token secret."))
 	_field(box, "mcp.enabled", "Run MCP server", "bool")
 	_field(box, "mcp.port", "Port", "int", [1024, 65535])
@@ -236,11 +237,24 @@ func _on_new_token() -> void:
 	_say("New token generated; reconnect your MCP clients.")
 
 
+# Uses the bundled Python bridge (installed next to the config by Runtime),
+# so no Node.js is needed.
 func _on_copy_desktop() -> void:
-	var snippet = {"mcpServers": {"budok": {"command": "npx", "args": ["-y", "mcp-remote",
-		"%s?token=%s" % [runtime.mcp.url(), runtime.config.get_value("mcp.auth_token", "")]]}}}
+	if runtime.bridge_path == "":
+		_on_copy_desktop_node()
+		return
+	var python = "python" if OS.get_name() == "Windows" else "python3"
+	var snippet = {"mcpServers": {"budok": {"command": python, "args": [runtime.bridge_path,
+		"--url", runtime.mcp.url(), "--token", str(runtime.config.get_value("mcp.auth_token", ""))]}}}
 	OS.set_clipboard(Util.json_str(snippet, false, "  "))
-	_say("Copied a claude_desktop_config.json snippet (uses mcp-remote; needs Node.js).")
+	_say("Copied a claude_desktop_config.json snippet (needs Python 3). Merge its mcpServers entry into your config and restart Claude Desktop.")
+
+
+func _on_copy_desktop_node() -> void:
+	var snippet = {"mcpServers": {"budok": {"command": "npx", "args": ["-y", "mcp-remote",
+		"%s?token=%s" % [runtime.mcp.url(), runtime.config.get_value("mcp.auth_token", "")], "--transport", "http-only", "--allow-http"]}}}
+	OS.set_clipboard(Util.json_str(snippet, false, "  "))
+	_say("Copied a claude_desktop_config.json snippet (uses mcp-remote; needs Node.js on the PATH Claude sees).")
 
 
 func _on_copy_code() -> void:

@@ -23,6 +23,8 @@ const OverlayPanel = preload("res://budok/ui/Panel.gd")
 const ModMenuHook = preload("res://budok/ui/ModMenuHook.gd")
 const Automation = preload("res://budok/automation/Automation.gd")
 const METADATA_PATH := "res://budok/_metadata"
+const BRIDGE_SOURCE := "res://budok/tools/budok_stdio.py"
+const BRIDGE_TARGET := "user://budok/budok_stdio.py"
 
 var config = null
 var roster = null
@@ -39,6 +41,7 @@ var panel = null
 var mod_menu = null
 var automation = null
 var server_state := {}
+var bridge_path := ""
 var _version := ""
 
 
@@ -70,6 +73,7 @@ func _ready() -> void:
 	automation.setup(self)
 	matches.connect("match_started", self, "_on_match_changed")
 	matches.connect("match_ended", self, "_on_match_changed")
+	_install_bridge()
 	print("budok %s ready: MCP %s" % [version(), server_state.get("url", server_state.get("error", "?"))])
 
 
@@ -78,6 +82,18 @@ func version() -> String:
 		var meta = Util.read_json(METADATA_PATH)
 		_version = str(meta.get("version", "0")) if meta is Dictionary else "0"
 	return _version
+
+
+# Copies the stdio bridge (for MCP clients that only launch local commands)
+# out of the mod zip to a real file path the client can run.
+func _install_bridge() -> void:
+	var source = Util.read_text(BRIDGE_SOURCE)
+	if source == null:
+		return
+	if Util.read_text(BRIDGE_TARGET) != source and not Util.write_text(BRIDGE_TARGET, source):
+		push_warning("budok: could not write %s" % BRIDGE_TARGET)
+		return
+	bridge_path = ProjectSettings.globalize_path(BRIDGE_TARGET)
 
 
 func restart_server() -> Dictionary:

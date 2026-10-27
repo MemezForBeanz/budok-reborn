@@ -37,8 +37,10 @@ The **Connect** tab shows the server URL (default `http://127.0.0.1:8765/mcp`) a
 with copy buttons for ready-made configs:
 
 - **Claude Code**: `claude mcp add --transport http budok http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"`
-- **Claude Desktop** (and other clients that only start stdio servers): use the copied
-  `claude_desktop_config.json` snippet. It runs `npx mcp-remote` and needs Node.js.
+- **Claude Desktop** (and other clients that only start local commands): click **Copy Claude Desktop
+  config** and merge its `mcpServers` entry into `claude_desktop_config.json`. It runs budok's bundled
+  stdio bridge with Python 3 (no Node.js needed). The bridge reconnects by itself when the game restarts.
+  `connectors/python/budok_stdio.py` is the same file, if you'd rather keep it somewhere else.
 - **Any other MCP client**: Streamable HTTP at the URL. Send `Authorization: Bearer <token>`, or add
   `?token=<token>` for clients that can't set headers.
 - **Web chatbots** (claude.ai connectors, ChatGPT) need a public HTTPS URL. Run a tunnel such as

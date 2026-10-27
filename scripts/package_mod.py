@@ -23,6 +23,8 @@ MOD_ROOT = REPO / "mod"
 DIST = REPO / "dist"
 SKIP_PARTS = {".import", ".godot", "__pycache__"}
 SKIP_SUFFIXES = {".uid", ".pyc"}
+# Files from outside the mod folder that ship inside a zip: {folder: {zip path: repo path}}.
+EXTRA_FILES = {"budok": {"budok/tools/budok_stdio.py": REPO / "connectors" / "python" / "budok_stdio.py"}}
 
 
 def build(folder: str) -> Path:
@@ -40,6 +42,8 @@ def build(folder: str) -> Path:
             if path.is_dir() or SKIP_PARTS & set(path.parts) or path.suffix in SKIP_SUFFIXES:
                 continue
             archive.write(path, Path(folder) / path.relative_to(source))
+        for zip_path, repo_path in EXTRA_FILES.get(folder, {}).items():
+            archive.write(repo_path, zip_path)
     return target
 
 

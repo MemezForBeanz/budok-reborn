@@ -22,3 +22,4 @@ def test_package_layout() -> None:
         names = archive.namelist()
     assert "budok/knowledge/gameplay.md" in names
     assert "budok/schemas/vanilla/Ninja.json" in names
+    assert "budok/tools/budok_stdio.py" in names, "stdio bridge ships with the mod"
