@@ -41,6 +41,10 @@ func _define() -> void:
 	var extra = {"type": "object", "description": "Optional extras: di {x,y} (-100..100, screen space), reverse (bool), feint (bool), and any character extras listed in the turn's extras.character.", "additionalProperties": true}
 	var data = {"description": "Move parameters shaped by the action's payload spec (omit to use the game's default)."}
 	var character = {"type": "string", "description": "Character name as shown by list_characters (display or internal name)."}
+	var detail_help = ("compact: move names with payload types and a slim observation (about a fifth of the size; get notes with describe_character). "
+		+ "summary (default): short notes and frame data per move. full: all notes, raw resources and the opponent's options. "
+		+ "A turn where Continue is the only move is always minimal.")
+	var detail = {"type": "string", "enum": ["compact", "summary", "full"], "description": detail_help}
 	_add("get_status", "Status", "Server, match and controller status, open turns, schema coverage and background jobs. Call first.", {}, [], true)
 	_add("list_characters", "List characters", "All playable characters (vanilla, newer builds and modded) with schema status.", {}, [], true)
 	_add("start_match", "Start match", "Start a local match. Works from the menu or mid-match (the current match is abandoned).",
@@ -58,18 +62,19 @@ func _define() -> void:
 	_add("release_slot", "Release slot", "Give a claimed slot back (the human can play it again).", {"slot": slot}, ["slot"])
 	_add("wait_for_turn", "Wait for turn", "Long-poll until your slot must choose a move. Returns the turn token, a plain-language situation, the observation and legal actions. Returns status 'waiting' after timeout_s: just call again.",
 		{"slot": slot, "timeout_s": {"type": "number", "minimum": 1, "maximum": 50, "description": "Default 20."},
-		"detail": {"type": "string", "enum": ["summary", "full"], "description": "full adds raw resources, move notes and the opponent's options."}}, [])
-	_add("get_turn", "Get turn", "The currently open turn for your slot, without waiting.", {"slot": slot, "detail": {"type": "string", "enum": ["summary", "full"]}}, [], true)
+		"detail": detail}, [])
+	_add("get_turn", "Get turn", "The currently open turn for your slot, without waiting.", {"slot": slot, "detail": detail}, [], true)
 	_add("simulate", "Simulate", "Preview a move on the real engine from the current turn: your action vs an assumed opponent action (default: they hold). Returns damage, end states, frame advantage and events. Never reveals the opponent's real choice.",
 		{"slot": slot, "action": {"type": "string"}, "data": data, "extra": extra,
 		"opponent_action": {"type": "string", "description": "Assumed opponent move (must be legal for them this turn)."},
 		"opponent_data": data, "opponent_extra": extra,
 		"ticks": {"type": "integer", "minimum": 10, "maximum": 300, "description": "Max ticks to simulate (default from settings)."}},
 		["action"], true)
-	_add("submit_action", "Submit action", "Lock in your move for the turn. Validated against the game; on error nothing is applied and you can retry with the same token.",
+	_add("submit_action", "Submit action", "Lock in your move for the turn. Validated against the game; on error nothing is applied and you can retry with the same token. "
+		+ "Retrying a move that was already locked in returns ok with already_applied (and the outcome), so a lost reply is safe to retry.",
 		{"turn_token": {"type": "string"}, "action": {"type": "string"}, "data": data, "extra": extra,
-		"wait_for_outcome": {"type": "boolean", "description": "Wait until the turn resolves and report what happened (default true)."},
-		"timeout_s": {"type": "number", "minimum": 1, "maximum": 50}}, ["turn_token", "action"])
+		"wait_for_outcome": {"type": "boolean", "description": "Wait until the turn resolves and report what happened (default true). If it is still pending after timeout_s (the opponent may be a slow human), just call wait_for_turn."},
+		"timeout_s": {"type": "number", "minimum": 1, "maximum": 50, "description": "Default 20, capped by the mcp.max_wait_s setting."}}, ["turn_token", "action"])
 	_add("get_match_log", "Match log", "Recent turn history (both players' moves after they resolved), decisions and result.",
 		{"last_n": {"type": "integer", "minimum": 1, "maximum": 200}}, [], true)
 	_add("describe_character", "Describe character", "Schema for a character: measured frame data + notes (category, beats, loses_to...).",
@@ -159,7 +164,31 @@ func _t_start_match(args: Dictionary, sid: String):
 				runtime.matches.claim(slot, sid, true)
 		result["your_slots"] = runtime.matches.slots_of(sid)
 		result["next"] = "call wait_for_turn"
+		_add_notes_hint(result)
 	return result
+
+
+# Points out characters in the match without move notes (typical for modded
+# ones), with the ways to write them.
+func _add_notes_hint(result: Dictionary) -> void:
+	var missing = _characters_without_notes()
+	if missing.empty():
+		return
+	result["notes_missing"] = missing
+	result["notes_hint"] = ("%s %s no move notes yet, so you only get measured frame data for %s. For better play, write them first: run the annotate_character prompt "
+		+ "(introspect_character, read_source, submit_character_schema), or call generate_character_schema to let the in-game AI do it. Otherwise simulate more.") % [
+		PoolStringArray(missing).join(" and "), "has" if missing.size() == 1 else "have", "it" if missing.size() == 1 else "them"]
+
+
+func _characters_without_notes() -> Array:
+	var missing = []
+	var infos = runtime.matches.infos()
+	for slot in ["p1", "p2"]:
+		var info = infos.get(slot, {})
+		var name = str(info.get("character", ""))
+		if str(info.get("status", "")) == "missing" and name != "" and not (name in missing):
+			missing.append(name)
+	return missing
 
 
 func _t_set_controller(args: Dictionary, _sid: String) -> Dictionary:
@@ -190,6 +219,8 @@ func _t_wait_for_turn(args: Dictionary, sid: String):
 	var view = runtime.matches.turn_view(slot["slot"], str(args.get("detail", "summary")))
 	view["ok"] = true
 	view["status"] = "your_turn"
+	if not runtime.matches.has_decided(slot["slot"]):
+		_add_notes_hint(view)
 	return view
 
 
@@ -222,7 +253,7 @@ func _t_simulate(args: Dictionary, sid: String):
 
 
 func _t_submit_action(args: Dictionary, sid: String):
-	var turn = runtime.matches.turn_for_token(str(args.get("turn_token", "")))
+	var turn = runtime.matches.known_turn(str(args.get("turn_token", "")))
 	if turn != null:
 		var owner_check = _slot({"slot": turn["slot"]}, sid)
 		if owner_check.has("error"):
@@ -233,8 +264,10 @@ func _t_submit_action(args: Dictionary, sid: String):
 	if not result["ok"] or not bool(args.get("wait_for_outcome", true)):
 		yield(runtime.get_tree(), "idle_frame")
 		return result
-	var outcome = yield(runtime.matches.wait_outcome(turn["slot"], clamp(float(args.get("timeout_s", 20)), 1.0, 50.0)), "completed")
-	result["outcome"] = outcome
+	# Same cap as wait_for_turn, so the call stays well inside client timeouts.
+	var max_wait = max(1.0, float(runtime.config.get_value("mcp.max_wait_s", 25)))
+	var timeout_s = clamp(float(args.get("timeout_s", 20)), 1.0, max_wait)
+	result["outcome"] = yield(runtime.matches.wait_outcome(turn["slot"], result["turn_tick"], timeout_s), "completed")
 	result["next"] = "call wait_for_turn"
 	return result
 

@@ -5,6 +5,7 @@ extends Reference
 # is a single source of truth.
 
 const Util = preload("res://budok/core/Util.gd")
+const Introspector = preload("res://budok/core/Introspector.gd")
 const KNOWLEDGE_DIR := "res://budok/knowledge"
 
 
@@ -47,9 +48,8 @@ static func character_primer(info: Dictionary, max_moves: int = 60) -> String:
 		var parts = ["%s [%s]" % [move_name, note.get("category", move.get("type", "?").to_lower())]]
 		if move.get("title", move_name) != move_name:
 			parts.append("\"%s\"" % move["title"])
-		if move.has("frames"):
-			parts.append("%df startup, %d dmg%s" % [move["frames"]["startup"], move["frames"]["total_damage"],
-				(", reach %d" % move["frames"]["reach"]) if move["frames"].has("reach") else ""])
+		if move.has("frames") or move.has("damage"):
+			parts.append(Introspector.frames_text(move))
 		if move.get("meter_bars", 0) > 0:
 			parts.append("%d bar(s)" % move["meter_bars"])
 		if note.has("summary"):

@@ -13,8 +13,8 @@ Each move button may own a **data UI scene** (an `ActionUIData` node). When lock
 
 | Control | Value | budok payload type |
 |---|---|---|
-| XYPlot (aim pad, also the DI pad) | `{"x": int, "y": int}`, each -100..100, screen space (+y down). May be angle-limited. | `xy` |
-| 8Way direction picker | `{"x": -1..1, "y": -1..1}`, or `"Neutral"` when nothing is chosen | `direction8` (pass a name such as `"NE"`) |
+| XYPlot (aim pad, also the DI pad) | `{"x": int, "y": int}`, each -100..100, screen space (+y down). The pad mirrors its value when the fighter turns, so the value always matches the arrow on screen. May be angle-limited to the forward side. | `xy` |
+| 8Way direction picker | `{"x": -1..1, "y": -1..1}`, or `"Neutral"` when nothing is chosen. Allowed directions mirror with facing. | `direction8` (pass a name such as `"NE"`) |
 | CountOption | `{"count": int}` | `int` (wraps as `count`) |
 | HorizSlider | `{"x": int}` | `int` (wraps as `x`) |
 | CheckButton | `true` / `false` | `bool` |

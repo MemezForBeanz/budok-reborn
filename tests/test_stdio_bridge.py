@@ -23,6 +23,7 @@ class FakeGame(BaseHTTPRequestHandler):
     token: ClassVar[str] = "first"
     sessions: ClassVar[set[str]] = set()
     counter: ClassVar[int] = 0
+    invalid_json: ClassVar[bool] = False
 
     def log_message(self, *_args: object) -> None:
         pass
@@ -36,7 +37,7 @@ class FakeGame(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def do_POST(self) -> None:  # noqa: N802 - http.server API
+    def do_POST(self) -> None:
         message = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if self.headers.get("Authorization") != f"Bearer {FakeGame.token}":
             self._send(401, {"error": "bad token"})
@@ -53,6 +54,14 @@ class FakeGame(BaseHTTPRequestHandler):
             return
         if self.headers.get("Mcp-Session-Id") not in FakeGame.sessions:
             self._send(404, {"jsonrpc": "2.0", "id": None, "error": {"code": -32001, "message": "session not found"}})
+            return
+        if FakeGame.invalid_json:
+            # What Godot's JSON.print makes of a NaN.
+            body = ('{"jsonrpc": "2.0", "id": ' + json.dumps(message["id"]) + ', "result": {"x": nan}}').encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         result = {"tools": [{"name": "get_status"}]} if message["method"] == "tools/list" else {
             "content": [{"type": "text", "text": "{\"ok\": true}"}], "isError": False}
@@ -71,6 +80,7 @@ def env(tmp_path: Path):
 
     FakeGame.token = "first"
     FakeGame.sessions = set()
+    FakeGame.invalid_json = False
     write_settings("first")
     bridge_env = {**os.environ, "XDG_DATA_HOME": str(tmp_path / "data"), "XDG_CACHE_HOME": str(tmp_path / "cache"), "HOME": str(tmp_path)}
     yield write_settings, bridge_env
@@ -128,6 +138,18 @@ def test_explicit_wrong_token_gives_a_clear_error(env) -> None:
         init = bridge.request(INIT)
         assert "token rejected" in init["result"]["serverInfo"]["title"]
         assert "token was rejected" in bridge.call(2)["error"]["message"]
+    finally:
+        bridge.close()
+
+
+def test_invalid_json_from_the_game_still_gets_an_answer(env) -> None:
+    _write_settings, bridge_env = env
+    bridge = BridgeProcess(bridge_env)
+    try:
+        bridge.request(INIT)
+        FakeGame.invalid_json = True
+        reply = bridge.call(2)
+        assert reply["id"] == 2 and "not valid JSON" in reply["error"]["message"]
     finally:
         bridge.close()
 

@@ -26,7 +26,7 @@ const RISKS := ["low", "medium", "high"]
 const MOVE_TEXT_FIELDS := ["summary", "beats", "loses_to", "use_when", "avoid_when", "payload_hint", "combo_hint"]
 const SUMMARY_TEXT_FIELDS := ["archetype", "game_plan"]
 const SUMMARY_LIST_FIELDS := ["strengths", "weaknesses", "tips"]
-const MEASURED_FIELDS := ["startup", "active", "recovery", "damage", "total_damage", "frames", "hitboxes", "meter", "meter_bars", "length", "hits"]
+const MEASURED_FIELDS := ["startup", "active", "recovery", "damage", "damage_in_combo", "max_damage", "total_damage", "frames", "hitboxes", "meter", "meter_bars", "length", "hits"]
 const MAX_TEXT := 600
 
 var _introspector = null

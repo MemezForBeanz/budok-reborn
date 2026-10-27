@@ -4,14 +4,26 @@ extends Node
 # Mod List → budok): the mod loader gives every mod a TabContainer with a
 # "Mod Info" tab, and we append our settings tabs to it. The window is rebuilt
 # with the main scene, so we keep checking and re-attach when needed.
+#
+# The window is only 400x220 of the game's 640x360 screen, and it also grows
+# (and never shrinks) when wrapped labels are first measured at zero width, so
+# it can end up taller than the screen. While budok's tab is open we size it to
+# the screen; when another mod is picked or the window closes, it gets its own
+# size and position back. The title bar's "Open Mods Folder" button sits at a
+# fixed x, so it moves with the right edge.
 
 const Util = preload("res://budok/core/Util.gd")
 const SettingsView = preload("res://budok/ui/SettingsView.gd")
 const CHECK_INTERVAL := 1.0
+const SCREEN_MARGIN := Vector2(10, 10)
 
 var runtime = null
 var view = null
 var _container = null
+var _menu = null
+var _home := Rect2()
+var _folder_button = null
+var _folder_button_x := 0.0
 var _timer := 0.0
 
 
@@ -23,38 +35,77 @@ func attached() -> bool:
 	return Util.valid(_container)
 
 
+func showing() -> bool:
+	return Util.valid(_container) and Util.valid(_menu) and _container.is_visible_in_tree()
+
+
 func _process(delta: float) -> void:
+	var showing = showing()
+	if showing and _menu.rect_size != _fit_size():
+		_fit()
 	_timer += delta
 	if _timer < CHECK_INTERVAL:
 		return
 	_timer = 0.0
 	if Util.valid(_container):
-		if _container.is_visible_in_tree() and view != null:
+		if showing and view != null:
 			view.refresh_status()
 		return
-	var container = _find_mod_tab()
+	var menu = _find_menu(get_tree().root, 0) if get_tree() != null else null
+	var container = _find_mod_tab(menu)
 	if container == null:
 		return
+	_menu = menu
 	_container = container
+	_home = Rect2(menu.rect_position, menu.rect_size)
+	_folder_button = menu.get_node_or_null("VBoxContainer/TitleBar/ModsLocation")
+	if _folder_button != null:
+		_folder_button_x = _folder_button.rect_position.x
+	container.connect("visibility_changed", self, "_on_visibility_changed")
 	view = SettingsView.new(runtime)
 	view.build_into(container)
 	print("budok: settings added to the Mod List window")
 
 
-func _find_mod_tab():
-	var tree = get_tree()
-	if tree == null:
-		return null
-	var menu = _find_menu(tree.root, 0)
+func _on_visibility_changed() -> void:
+	if not (Util.valid(_menu) and Util.valid(_container)):
+		return
+	if _container.is_visible_in_tree():
+		_fit()
+	else:
+		_menu.rect_size = _home.size
+		_menu.rect_position = _home.position
+		_place_folder_button()
+
+
+func _fit_size() -> Vector2:
+	return (_menu.get_viewport_rect().size - SCREEN_MARGIN * 2).floor()
+
+
+func _fit() -> void:
+	_menu.rect_size = _fit_size()
+	_menu.rect_position = SCREEN_MARGIN
+	_place_folder_button()
+
+
+func _place_folder_button() -> void:
+	if Util.valid(_folder_button):
+		_folder_button.rect_position.x = _folder_button_x + _menu.rect_size.x - _home.size.x
+
+
+func _find_mod_tab(menu):
 	if menu == null:
 		return null
 	var info = Util.prop(menu, "info_container", null)
 	if not Util.valid(info):
 		return null
+	# Exact name first: other mods (budok's test fighter) can start with "budok" too.
 	var friendly = _friendly_name()
-	for child in info.get_children():
-		if child is TabContainer and (str(child.name) == friendly or str(child.name).begins_with("budok")):
-			return child
+	for prefix in [friendly, "budok -"]:
+		for child in info.get_children():
+			var child_name = str(child.name)
+			if child is TabContainer and (child_name == friendly or child_name.begins_with(prefix)):
+				return child
 	return null
 
 

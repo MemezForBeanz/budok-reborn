@@ -29,7 +29,7 @@ reaction (hurt, knockdown). Key exported fields:
 | `data_ui_scene` | Scene with the move's parameters (aim, charge, direction...). Its `get_data()` becomes `data`. |
 | `anim_length`, `iasa_at`, `interrupt_frames` | Length and cancel points. |
 | `interrupt_from_string` / `interrupt_into_string` / `hit_cancel_into_string` | Category names (one per line or comma separated) that decide which states can cancel into which. The panel's legal moves come from these plus `fighter.action_cancels`. |
-| `super_level_`, `supers_used_` | Meter bars required and spent. |
+| `super_level_`, `supers_used_` | Meter bars required and spent. Supers that extend `res://characters/states/SuperMove.gd` also require and spend their own `super_level` / `supers_used` (default 1). |
 | `combo_only`, `neutral_only`, `reversible`, `can_feint_if_possible`, `force_feintable`, `beats_backdash` | Usage rules. |
 | `projectile_scene`, `projectile_tick` | Built-in projectile spawn. |
 | `UsableRequirement` child nodes | Extra conditions for `is_usable()`. |
@@ -47,6 +47,12 @@ Hitbox nodes under a state carry `damage`, `start_tick`, `active_ticks`, `hitstu
 `hits_otg`, `beats_grab` and `followup_state`. `ThrowBox` adds `throw_state` (a grab). `Detect` boxes
 deal no damage; they are used to trigger follow-ups. At runtime a state reaches its hitboxes through
 `all_hitbox_nodes` (and the fighter through `host.hitboxes`); don't rely on `$Hitbox` paths.
+
+Hitboxes with the same `group` (default 0) are one attack: once one of them hits, none of them can hit
+that opponent again during the move. Multi-hit moves give each hit its own group, or use `looping`
+boxes that re-arm while active. `damage_in_combo` replaces `damage` when the move lands mid-combo, and
+combo scaling lowers it further. A hitbox left at `start_tick` 0 is usually switched on by the state's
+code.
 
 ## Extras panel
 

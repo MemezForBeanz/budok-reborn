@@ -21,9 +21,14 @@ signal match_ended(result)
 const Util = preload("res://budok/core/Util.gd")
 const ActionCatalog = preload("res://budok/core/ActionCatalog.gd")
 const Observation = preload("res://budok/core/Observation.gd")
+const Introspector = preload("res://budok/core/Introspector.gd")
+const PayloadSpec = preload("res://budok/core/PayloadSpec.gd")
 const CONTROLLERS := ["human", "mcp", "ai"]
 const SLOTS := ["p1", "p2"]
 const MATCH_LOG_DIR := "user://budok/matches"
+const CLOSED_TURNS_KEPT := 16
+const DETAILS := ["compact", "summary", "full"]
+const SUMMARY_NOTE_CHARS := 160
 
 var runtime = null
 
@@ -40,6 +45,15 @@ var last_result = null
 var _next_controllers = null
 var _awaiting_frames := {"p1": 0, "p2": 0}
 var _last_decision_tick := -1
+# Each fighter's state at the last decision point, for the history entry.
+var _decision_point := {}
+# Recently closed turns by token, so a retried submit learns what happened.
+var _closed := {}
+var _closed_order := []
+# Objects' movement over the last tick, by instance id (see _track_motion).
+var _motion := {}
+var _motion_positions := {}
+var _motion_tick := -1
 var _starting := false
 var _buttons_cache := {}
 
@@ -59,6 +73,7 @@ func _process(_delta: float) -> void:
 		_attach(current)
 	if game == null or not match_info.has("started_ms") or last_result != null or blocked_reason != "":
 		return
+	_track_motion()
 	for slot in SLOTS:
 		_poll_slot(slot)
 
@@ -155,40 +170,98 @@ func turn_for_token(token: String):
 	return null
 
 
-# Everything a decision-maker needs for one open turn.
+# Whether `slot` has made any decision yet this match.
+func has_decided(slot: String) -> bool:
+	for decision in decisions:
+		if decision["slot"] == slot:
+			return true
+	return false
+
+
+# Open or recently closed turn (retries of a submit can arrive after it closed).
+func known_turn(token: String):
+	var turn = turn_for_token(token)
+	return turn if turn != null else _closed.get(token)
+
+
+# Everything a decision-maker needs for one open turn. detail: compact (move
+# names and payload types only; notes via describe_character), summary (short
+# notes and frame data) or full (all notes, raw resources, opponent's options).
 func turn_view(slot: String, detail: String = "summary") -> Dictionary:
 	var turn = turns.get(slot)
 	if turn == null or turn.has("applied"):
 		return {}
-	var obs = Observation.build(game, slot, _infos(), history, detail)
+	if not (detail in DETAILS):
+		detail = "summary"
+	var obs = Observation.build(game, slot, _infos(), history, detail, _motion)
+	var actions = turn["catalog"]["actions"]
+	var extras = turn["catalog"]["extras"]
 	var view = {
 		"turn_token": turn["token"],
 		"slot": slot,
 		"tick": turn["tick"],
 		"situation": Observation.situation(obs),
-		"observation": obs,
-		"legal_actions": _annotated_actions(slot, turn["catalog"]["actions"], detail),
-		"extras": turn["catalog"]["extras"],
 	}
+	if actions.size() == 1 and actions[0]["action"] == "Continue":
+		# Mid-move or in hitstun: there is nothing to weigh but DI.
+		view["only_option"] = "Continue"
+		view["hint"] = "Continue is your only legal move (you are mid-move or being hit); submit it%s." % (
+			", with extra.di {x, y} to steer your knockback" if extras.get("di") != null else "")
+		if extras.get("di") != null:
+			view["extras"] = {"di": extras["di"]}
+		return view
+	if detail == "compact":
+		view["observation"] = Observation.compact(obs)
+		view["legal_actions"] = _compact_actions(actions)
+		view["extras"] = extras
+		view["payload_help"] = PayloadSpec.help_for(actions)
+		return view
+	view["observation"] = obs
+	view["legal_actions"] = _annotated_actions(slot, actions, detail)
+	view["extras"] = extras
+	view["payload_help"] = PayloadSpec.help_for(actions)
 	var opponent_turn = turns.get(Observation.other(slot))
 	if detail == "full" and opponent_turn != null:
 		view["opponent_options"] = _annotated_actions(Observation.other(slot), opponent_turn["catalog"]["actions"], "summary")
 	return view
 
 
+# "QuickSlash (xy)", "Grab", "ChargeBlast (object: Spend)": enough to pick from
+# and fill in; describe_character has the notes.
+static func _compact_actions(actions: Array) -> Array:
+	var out = []
+	for action in actions:
+		var text = action["action"]
+		var payload = action.get("payload")
+		if payload is Dictionary:
+			var kind = payload["type"]
+			if kind == "object":
+				kind += ": " + PoolStringArray(payload.get("fields", {}).keys()).join(", ")
+			elif kind == "direction8":
+				kind += " " + PoolStringArray(payload.get("allowed", [])).join("/")
+			elif kind == "int":
+				kind += " %d..%d" % [payload["min"], payload["max"]]
+			elif kind == "option":
+				kind += " " + PoolStringArray(payload.get("choices", [])).join("/")
+			text += " (%s)" % kind
+		out.append(text)
+	return out
+
+
 func observation(slot: String, detail: String) -> Dictionary:
 	if game == null:
 		return {}
-	return Observation.build(game, slot, _infos(), history, detail)
+	return Observation.build(game, slot, _infos(), history, detail, _motion)
 
 
 func submit(token: String, action: String, data, extra, source: String) -> Dictionary:
-	var turn = turn_for_token(token)
+	var turn = known_turn(token)
 	if turn == null:
-		return {"ok": false, "error": "stale_turn", "message": "turn token is not open (already decided, timed out or the match moved on); call wait_for_turn"}
+		return {"ok": false, "error": "stale_turn", "message": "unknown turn token (from an earlier match or too old); call wait_for_turn"}
+	if turn.has("closed") and not turn.has("applied"):
+		return {"ok": false, "error": "stale_turn", "turn_tick": turn["tick"], "message": "this turn ended without your move (%s); call wait_for_turn" % turn["closed"]}
 	if turn.has("applied"):
-		return {"ok": false, "error": "already_submitted", "message": "this turn was already decided (%s by %s); call wait_for_turn" % [
-			turn["applied"]["action"], turn["applied"]["source"]]}
+		return _already_applied(turn, action)
 	var slot = turn["slot"]
 	var buttons = _buttons(slot)
 	var fighter = Observation.fighter_of(game, slot)
@@ -201,7 +274,23 @@ func submit(token: String, action: String, data, extra, source: String) -> Dicti
 	decisions.append({"tick": turn["tick"], "slot": slot, "action": action, "data": Util.json_safe(resolved["data"]),
 		"source": source, "think_ms": Util.now_ms() - turn["opened_ms"]})
 	ActionCatalog.submit(buttons, action, resolved["data"], resolved["extra"])
-	return {"ok": true, "applied": {"action": action, "data": Util.json_safe(resolved["data"]), "extra": Util.json_safe(resolved["extra"])}}
+	return {"ok": true, "turn_tick": turn["tick"], "applied": _applied_view(turn)}
+
+
+# A retry of a turn that was already locked in (say the reply to the first
+# submit got lost). Same move: report success again, so the caller can go on.
+func _already_applied(turn: Dictionary, action: String) -> Dictionary:
+	var applied = turn["applied"]
+	if applied["action"] == action:
+		return {"ok": true, "turn_tick": turn["tick"], "applied": _applied_view(turn), "already_applied": true,
+			"message": "this move was already locked in for this turn"}
+	return {"ok": false, "error": "already_submitted", "turn_tick": turn["tick"], "applied": _applied_view(turn),
+		"message": "this turn was already decided (%s by %s); call wait_for_turn" % [applied["action"], applied["source"]]}
+
+
+static func _applied_view(turn: Dictionary) -> Dictionary:
+	var applied = turn["applied"]
+	return {"action": applied["action"], "data": Util.json_safe(applied["data"]), "extra": Util.json_safe(applied["extra"])}
 
 
 # Coroutine: waits until `slot` has an open turn (or the match ends).
@@ -219,19 +308,40 @@ func wait_turn(slot: String, timeout_s: float) -> Dictionary:
 	return {}
 
 
-# Coroutine: after a submit, waits for the turn to resolve and reports what
-# happened (opponent's revealed move, damage).
-func wait_outcome(_slot: String, timeout_s: float) -> Dictionary:
+# Coroutine: after a submit, waits until the turn that opened at `turn_tick`
+# has played out (the next decision point or the end of the match) and reports
+# what happened: both moves, revealed only now, and the damage.
+func wait_outcome(slot: String, turn_tick: int, timeout_s: float) -> Dictionary:
 	yield(get_tree(), "idle_frame")
-	var start_entries = history.size()
 	var deadline = Util.now_ms() + int(timeout_s * 1000.0)
-	while Util.now_ms() < deadline:
+	while true:
+		var entry = history_entry(turn_tick)
 		if last_result != null:
-			return {"status": "match_over", "result": last_result}
-		if history.size() > start_entries:
-			return {"status": "resolved", "turn": history[history.size() - 1]}
+			var over = {"status": "match_over", "result": last_result}
+			if entry != null:
+				over["turn"] = entry
+			return over
+		if entry != null:
+			return {"status": "resolved", "turn": entry, "your_turn": turns[slot] != null and not turns[slot].has("applied")}
+		if Util.now_ms() >= deadline:
+			break
 		yield(get_tree().create_timer(0.1), "timeout")
-	return {"status": "pending", "message": "turn not resolved yet (opponent still choosing)"}
+	var other = turns[Observation.other(slot)]
+	var opponent_choosing = other != null and not other.has("applied")
+	return {"status": "pending", "waiting_on": "opponent" if opponent_choosing else "game",
+		"message": "your move is locked in; %s. Call wait_for_turn: it returns when you must choose again, and get_match_log shows this turn once it resolves." % (
+			"the opponent has not chosen yet" if opponent_choosing else "the turn is still playing out")}
+
+
+# The history entry for the decision point at `tick`, once that turn resolved.
+func history_entry(tick: int):
+	for i in range(history.size() - 1, -1, -1):
+		var entry = history[i]
+		if entry["tick"] == tick:
+			return entry
+		if entry["tick"] < tick:
+			break
+	return null
 
 
 # Coroutine: what-if preview from `slot`'s perspective.
@@ -315,6 +425,12 @@ func _attach(current) -> void:
 	history = []
 	decisions = []
 	_last_decision_tick = -1
+	_decision_point = {}
+	_closed = {}
+	_closed_order = []
+	_motion = {}
+	_motion_positions = {}
+	_motion_tick = -1
 	if _next_controllers != null:
 		for slot in SLOTS:
 			if _next_controllers.has(slot):
@@ -362,11 +478,13 @@ func _poll_slot(slot: String) -> void:
 	var awaiting = ActionCatalog.is_awaiting(buttons, fighter) and bool(Util.prop(game, "game_paused", true))
 	var turn = turns[slot]
 	if turn != null:
-		if not awaiting:
-			_close_turn(slot, "applied" if turn.has("applied") else "resolved_elsewhere")
-		else:
+		# The tick only moves once the turn is over. A one-tick turn can end and
+		# the next decision point start within a single frame, with the panel
+		# never seen inactive, so a new tick also closes the turn.
+		if awaiting and Util.as_int(Util.prop(game, "current_tick", 0)) == turn["tick"]:
 			_check_timeout(slot, turn)
-		return
+			return
+		_close_turn(slot, "applied" if turn.has("applied") else "resolved_elsewhere")
 	if not awaiting:
 		_awaiting_frames[slot] = 0
 		return
@@ -402,8 +520,14 @@ func _close_turn(slot: String, how: String) -> void:
 	var turn = turns[slot]
 	turns[slot] = null
 	_awaiting_frames[slot] = 0
-	if turn != null:
-		emit_signal("turn_closed", slot, turn["token"], how)
+	if turn == null:
+		return
+	turn["closed"] = how
+	_closed[turn["token"]] = turn
+	_closed_order.append(turn["token"])
+	if _closed_order.size() > CLOSED_TURNS_KEPT:
+		_closed.erase(_closed_order.pop_front())
+	emit_signal("turn_closed", slot, turn["token"], how)
 
 
 func _check_timeout(slot: String, turn: Dictionary) -> void:
@@ -435,7 +559,9 @@ func _is_forced(catalog: Dictionary, fighter) -> bool:
 
 # The game records each player's committed input in ReplayManager.frames; we
 # read the latest ones when the next decision point arrives, so the opponent's
-# move is only revealed after it has resolved.
+# move is only revealed after it has resolved. A player who was mid-move at the
+# decision point (busy) could only let it continue, so their "Continue" comes
+# with the state that kept running.
 func _record_history(tick: int) -> void:
 	if tick == _last_decision_tick:
 		return
@@ -447,6 +573,7 @@ func _record_history(tick: int) -> void:
 				kept.append(entry)
 		history = kept
 		_last_decision_tick = tick
+		_decision_point = _snapshot_decision_point()
 		return
 	if _last_decision_tick >= 0:
 		var entry = {"tick": _last_decision_tick}
@@ -463,6 +590,11 @@ func _record_history(tick: int) -> void:
 			if latest != -1 and player_frames[latest] is Dictionary:
 				action = str(player_frames[latest].get("action", "?"))
 			entry[slot] = {"action": action, "hp": Util.as_int(Util.prop(fighter, "hp", 0))}
+			var before = _decision_point.get(slot, {})
+			if before.get("busy", false):
+				entry[slot]["busy"] = true
+			if before.get("busy", false) or action in ["Continue", "(busy)"]:
+				entry[slot]["state"] = before.get("state", "?")
 		if history.size() > 0:
 			var prev = history[history.size() - 1]
 			for slot in SLOTS:
@@ -472,6 +604,43 @@ func _record_history(tick: int) -> void:
 		if history.size() > limit:
 			history = history.slice(history.size() - limit, history.size() - 1)
 	_last_decision_tick = tick
+	_decision_point = _snapshot_decision_point()
+
+
+# Samples object positions once per game tick. Many projectiles move by
+# setting their position each tick and report a physics velocity of 0, so the
+# real speed is the distance covered over the last tick.
+func _track_motion() -> void:
+	var tick = Util.as_int(Util.prop(game, "current_tick", 0))
+	if tick == _motion_tick:
+		return
+	var positions = {}
+	var list = Util.prop(game, "objects", [])
+	for obj in list if list is Array else []:
+		if Util.valid(obj):
+			positions[obj.get_instance_id()] = Util.xy(Util.call_or(obj, "get_pos", [], Vector2.ZERO))
+	var elapsed = tick - _motion_tick
+	_motion = {}
+	if _motion_tick >= 0 and elapsed > 0:
+		for id in positions:
+			var before = _motion_positions.get(id)
+			if before != null:
+				_motion[id] = {"x": int(round(float(positions[id]["x"] - before["x"]) / elapsed)),
+					"y": int(round(float(positions[id]["y"] - before["y"]) / elapsed))}
+	_motion_positions = positions
+	_motion_tick = tick
+
+
+func _snapshot_decision_point() -> Dictionary:
+	var point = {}
+	for slot in SLOTS:
+		var fighter = Observation.fighter_of(game, slot)
+		var state = Util.call_or(fighter, "current_state")
+		point[slot] = {
+			"state": str(Util.prop(state, "state_name", Util.prop(state, "name", "?"))),
+			"busy": bool(Util.prop(fighter, "busy_interrupt", false)),
+		}
+	return point
 
 
 func _on_game_won(winner) -> void:
@@ -524,12 +693,10 @@ func _annotated_actions(slot: String, actions: Array, detail: String) -> Array:
 		if notes.has("category"):
 			entry["category"] = notes["category"]
 		if notes.has("summary"):
-			entry["notes"] = notes["summary"]
+			entry["notes"] = notes["summary"] if detail == "full" else Util.truncate(notes["summary"], SUMMARY_NOTE_CHARS)
 		var measured = moves.get(entry["action"], {})
-		if measured.has("frames"):
-			var frames = measured["frames"]
-			entry["frames"] = "startup %d, active %d, recovery %d, %d dmg%s" % [frames["startup"], frames["active"], frames["recovery"],
-				frames["total_damage"], (", reach %d" % frames["reach"]) if frames.has("reach") else ""]
+		if measured.has("frames") or measured.has("damage"):
+			entry["frames"] = Introspector.frames_text(measured)
 		if measured.get("meter_bars", 0) > 0:
 			entry["meter_bars"] = measured["meter_bars"]
 		if detail == "full":

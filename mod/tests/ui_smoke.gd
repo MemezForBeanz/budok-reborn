@@ -49,6 +49,7 @@ func _run() -> void:
 	mod_info.name = "Mod Info"
 	budok_tabs.add_child(mod_info)
 	info.add_child(budok_tabs)
+	menu.rect_size = Vector2(400, 220)
 	var main = Control.new()
 	main.name = "Main"
 	main.add_child(menu)
@@ -78,4 +79,15 @@ func _run() -> void:
 	runtime.panel.toggle()
 	view._on_copy_url()
 	check(OS.get_clipboard().find("?token=") != -1 or OS.get_name() == "Server", "copy URL")
+	# The window fits the screen while budok's tab is open and gets its own
+	# size back afterwards.
+	budok_tabs.hide()
+	yield(self, "idle_frame")
+	budok_tabs.show()
+	yield(self, "idle_frame")
+	var screen = menu.get_viewport_rect().size
+	check(menu.rect_size == (screen - Vector2(20, 20)).floor() and menu.rect_position == Vector2(10, 10), "Mod List window fits the screen on the budok tab")
+	budok_tabs.hide()
+	yield(self, "idle_frame")
+	check(menu.rect_size == Vector2(400, 220), "Mod List window size restored")
 	quit(failures)

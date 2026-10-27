@@ -8,7 +8,9 @@ extends Node
 # current thing).
 
 const Util = preload("res://budok/core/Util.gd")
+const Observation = preload("res://budok/core/Observation.gd")
 const GAME_SCENE := "res://Game.tscn"
+const MAX_EVENTS := 40
 const NEUTRAL_EXTRA := {"DI": {"x": 0, "y": 0}, "reverse": false, "feint": false, "prediction": -1}
 
 var _busy := false
@@ -85,17 +87,31 @@ func _step(sim, max_ticks: int, viewer: String) -> Dictionary:
 	var hp_prev = {"me": start["me"]["hp"], "opponent": start["opponent"]["hp"]}
 	var ticks = 0
 	var turn_end = -1
+	# Objects already on screen (by id) and their positions one tick ago, for
+	# spawn events and measured speed.
+	var positions = _object_positions(sim)
+	var motion = {}
 	while ticks < max_ticks:
 		sim.simulate_one_tick()
 		ticks += 1
+		var now = _object_positions(sim)
+		motion = {}
+		for id in now:
+			if positions.has(id):
+				motion[id] = {"x": now[id]["x"] - positions[id]["x"], "y": now[id]["y"] - positions[id]["y"]}
+			elif events.size() < MAX_EVENTS:
+				var obj = instance_from_id(id)
+				events.append({"tick": ticks, "event": "spawn", "object": Util.strip_trailing_digits(str(obj.name)),
+					"owner": _owner_of(obj, fighters["me"]), "position": now[id]})
+		positions = now
 		for who in fighters:
 			var f = fighters[who]
 			var hp = Util.as_int(Util.prop(f, "hp", 0))
-			if hp < hp_prev[who]:
+			if hp < hp_prev[who] and events.size() < MAX_EVENTS:
 				events.append({"tick": ticks, "event": "damage", "target": who, "amount": hp_prev[who] - hp})
 			hp_prev[who] = hp
 			var state_name = str(Util.prop(Util.call_or(f, "current_state"), "state_name", "?"))
-			if state_name != last_state[who] and events.size() < 40:
+			if state_name != last_state[who] and events.size() < MAX_EVENTS:
 				events.append({"tick": ticks, "event": "state", "who": who, "state": state_name})
 				last_state[who] = state_name
 			if ready_at[who] == -1 and (
@@ -123,6 +139,16 @@ func _step(sim, max_ticks: int, viewer: String) -> Dictionary:
 		"actionable_tick": ready_at,
 		"next_decision_tick": turn_end,
 	}
+	var objects = Observation.objects(sim, fighters["me"], motion)
+	if not objects.empty():
+		result["objects"] = objects
+	# Hitlag freezes a fighter, so its move only starts once it runs out.
+	var hitlag = {}
+	for who in start:
+		if start[who]["hitlag"] > 0:
+			hitlag[who] = start[who]["hitlag"]
+	if not hitlag.empty():
+		result["in_hitlag"] = hitlag
 	if ready_at["me"] != -1 and ready_at["opponent"] != -1:
 		result["frame_advantage"] = ready_at["opponent"] - ready_at["me"]
 	result["summary"] = _summary(result)
@@ -136,11 +162,34 @@ func _snapshot(f) -> Dictionary:
 		"state": str(Util.prop(Util.call_or(f, "current_state"), "state_name", "?")),
 		"combo_count": Util.as_int(Util.prop(f, "combo_count", 0)),
 		"meter_bars": Util.as_int(Util.prop(f, "supers_available", 0)),
+		"hitlag": Util.as_int(Util.prop(f, "hitlag_ticks", 0)),
 	}
 
 
+static func _object_positions(sim) -> Dictionary:
+	var positions = {}
+	var list = Util.prop(sim, "objects", [])
+	for obj in list if list is Array else []:
+		if Util.valid(obj) and not bool(Util.prop(obj, "disabled", false)):
+			positions[obj.get_instance_id()] = Util.xy(Util.call_or(obj, "get_pos", [], Vector2.ZERO))
+	return positions
+
+
+static func _owner_of(obj, me) -> String:
+	var creator = Util.prop(obj, "creator", null)
+	if not Util.valid(creator):
+		return ""
+	return "mine" if creator == me else "opponent"
+
+
 func _summary(r: Dictionary) -> String:
-	var text = "After %d ticks: you dealt %d and took %d damage. You end in %s, opponent in %s." % [
+	var text = ""
+	var hitlag = r.get("in_hitlag", {})
+	if hitlag.has("me"):
+		text += "You start in hitlag (%d ticks frozen), so your move begins after that. " % hitlag["me"]
+	if hitlag.has("opponent"):
+		text += "The opponent starts in hitlag (%d ticks). " % hitlag["opponent"]
+	text += "After %d ticks: you dealt %d and took %d damage. You end in %s, opponent in %s." % [
 		r["ticks_simulated"], r["damage_dealt"], r["damage_taken"], r["me"]["state"], r["opponent"]["state"]]
 	if r.has("frame_advantage"):
 		var adv = r["frame_advantage"]

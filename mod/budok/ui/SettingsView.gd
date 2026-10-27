@@ -98,7 +98,7 @@ func _connect_tab() -> Control:
 	box.add_child(_row("Token", _token_edit))
 	box.add_child(_buttons([["Show / hide token", "_on_show_token"], ["Copy URL + token", "_on_copy_url"], ["New token", "_on_new_token"]]))
 	box.add_child(_buttons([["Copy Claude Code command", "_on_copy_code"], ["Copy Claude Desktop config", "_on_copy_desktop"]]))
-	box.add_child(_buttons([["Copy Claude Desktop config (Node.js / mcp-remote)", "_on_copy_desktop_node"]]))
+	box.add_child(_buttons([["Copy Desktop config (Node.js)", "_on_copy_desktop_node"]]))
 	box.add_child(_hint("Point any MCP client at the URL with the token (Authorization: Bearer <token>, or ?token=). Web chatbots need a public HTTPS tunnel to this port; keep the token secret."))
 	_field(box, "mcp.enabled", "Run MCP server", "bool")
 	_field(box, "mcp.port", "Port", "int", [1024, 65535])
@@ -163,6 +163,7 @@ func _providers_tab() -> Control:
 func _characters_tab() -> Control:
 	var box = _tab("Characters")
 	_char_picker = OptionButton.new()
+	_char_picker.clip_text = true
 	_char_picker.connect("item_selected", self, "_on_character_selected")
 	box.add_child(_row("Character", _char_picker))
 	_char_status = Label.new()
@@ -357,6 +358,7 @@ func _field(box: Control, path: String, label: String, type: String, options = n
 			control.max_value = options[1]
 		"option":
 			control = OptionButton.new()
+			control.clip_text = true
 			for item in options:
 				control.add_item(item if item != "" else "(default)")
 				control.set_item_metadata(control.get_item_count() - 1, item)
@@ -416,40 +418,53 @@ func _tab(title: String) -> VBoxContainer:
 	return box
 
 
-# Each tab scrolls so long sections fit in the Mod List window.
+# Each tab is a scroll area with a message line under it, so results stay in
+# view however far the tab is scrolled. Horizontal scrolling stays on so the
+# content's width never stretches the window (the game draws at 640x360).
 func _end_tab(box: VBoxContainer) -> Control:
+	var tab = VBoxContainer.new()
+	tab.name = box.name
 	var scroll = ScrollContainer.new()
-	scroll.name = box.name
-	scroll.scroll_horizontal_enabled = false
+	scroll.follow_focus = true
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.name = "Content"
 	scroll.add_child(box)
+	tab.add_child(scroll)
 	var message = Label.new()
 	message.autowrap = true
-	box.add_child(message)
+	message.visible = false
+	tab.add_child(message)
 	_messages.append(message)
-	return scroll
+	return tab
 
 
 func _save_row() -> Control:
 	return _buttons([["Save", "_on_save"]])
 
 
+# Label and control share the row, so it fits narrow windows; long labels wrap.
 func _row(label_text: String, control: Control) -> HBoxContainer:
 	var row = HBoxContainer.new()
 	var label = Label.new()
 	label.text = label_text
 	label.autowrap = true
-	label.rect_min_size = Vector2(220, 0)
+	label.valign = Label.VALIGN_CENTER
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(label)
+	if control is CheckBox:
+		# Kept at its own size (the game's theme draws a dark box behind it).
+		var holder = HBoxContainer.new()
+		holder.add_child(control)
+		control = holder
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(control)
 	return row
 
 
-func _buttons(specs: Array) -> HBoxContainer:
-	var row = HBoxContainer.new()
+# Buttons wrap onto more lines when the window is narrow.
+func _buttons(specs: Array) -> Container:
+	var row = ClassDB.instance("HFlowContainer") if ClassDB.class_exists("HFlowContainer") else HBoxContainer.new()
 	for spec in specs:
 		var button = Button.new()
 		button.text = spec[0]
@@ -461,6 +476,7 @@ func _buttons(specs: Array) -> HBoxContainer:
 func _header(text: String) -> Label:
 	var label = Label.new()
 	label.text = text
+	label.modulate = Color(1.0, 0.8, 0.35)
 	return label
 
 
@@ -475,3 +491,4 @@ func _say(text: String) -> void:
 	for message in _messages:
 		if Util.valid(message):
 			message.text = text
+			message.visible = text != ""

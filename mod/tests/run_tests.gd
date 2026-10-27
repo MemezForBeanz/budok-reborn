@@ -57,6 +57,10 @@ func _test_util() -> void:
 	check(Util.strip_trailing_digits("Bullet12") == "Bullet" and Util.strip_trailing_digits("42") == "42", "strip_trailing_digits")
 	check(same(Util.json_safe(Vector2(1.5, 2)), {"x": 1.5, "y": 2.0}), "json_safe Vector2")
 	check(Util.as_int("3.6") == 4 and Util.as_int(2.0) == 2 and Util.as_int(null, 7) == 7, "as_int")
+	# Godot prints NaN / infinity as bare nan / inf; replies must stay valid JSON.
+	var printed = Util.json_str({"a": NAN, "b": [INF, -INF, 1.5], "c": "info: inf, nan"})
+	check(JSON.parse(printed).error == OK and printed.find("null") != -1 and printed.find("info: inf, nan") != -1, "json_str nulls NaN and infinity: %s" % printed)
+	check(Util.json_str({"info": "infinite"}) == JSON.print({"info": "infinite"}), "json_str leaves ordinary text alone")
 	var root = Control.new()
 	var middle = Control.new()
 	var leaf = Control.new()
@@ -100,6 +104,17 @@ func _test_payload_spec() -> void:
 	check(same(PayloadSpec.coerce(dir_spec, {"x": 0, "y": -5})["value"], {"x": 0, "y": -1}), "direction from vector")
 	var xy = PayloadSpec.coerce({"kind": "xy", "default": {"x": 0, "y": 0}}, {"x": 250.0, "y": -3.4})
 	check(xy["ok"] and same(xy["value"], {"x": 100, "y": -3}), "xy clamps and rounds")
+	# Clients without a fixed type for data send JSON text or wrappers.
+	var west = {"kind": "direction8", "allowed": ["NW", "W"], "default": "Neutral"}
+	check(same(PayloadSpec.coerce(west, "\"NW\"")["value"], {"x": -1, "y": -1}), "direction as JSON text")
+	check(same(PayloadSpec.coerce(west, {"direction": "nw"})["value"], {"x": -1, "y": -1}), "direction in a wrapper object")
+	check(same(PayloadSpec.coerce(west, "up-left")["value"], {"x": -1, "y": -1}), "direction aliases")
+	var wrong = PayloadSpec.coerce(west, "sideways")
+	check(not wrong["ok"] and wrong["error"].find("sideways") != -1, "direction error shows what was sent")
+	check(same(PayloadSpec.coerce({"kind": "xy", "default": {}}, "{\"x\": 10, \"y\": -20}")["value"], {"x": 10, "y": -20}), "xy as JSON text")
+	check(same(PayloadSpec.coerce({"kind": "xy", "default": {}}, [30, 40])["value"], {"x": 30, "y": 40}), "xy as [x, y]")
+	var help = PayloadSpec.help_for([{"action": "A", "payload": {"type": "object", "fields": {"Dir": {"type": "direction8"}}}}, {"action": "B"}])
+	check(help.has("object") and help.has("direction8") and help.size() == 2, "payload help lists the types in use once")
 	data_node.free()
 	custom.free()
 
@@ -165,6 +180,10 @@ func _test_introspector() -> void:
 	var box = make(box_source)
 	box.name = "Hitbox"
 	state.add_child(box)
+	# A super extending SuperMove: its own super_level counts on top of CharState's.
+	var super_state = make(state_source + "var super_level_ = 0\nvar supers_used_ = -1\nvar super_level = 1\nvar supers_used = -1\n")
+	super_state.name = "BigSuper"
+	machine.add_child(super_state)
 	var intro = Introspector.new()
 	var info = intro._build(fighter, {"display_name": "Fake", "name": "F-1__Fake", "scene_path": "res://x/Fake.tscn"})
 	var move = info["moves"].get("BigPunch", {})
@@ -173,7 +192,19 @@ func _test_introspector() -> void:
 	check(move["frames"]["recovery"] == 18 - 7, "recovery from iasa (negative iasa counts from the end)")
 	check(move["frames"]["reach"] == 35 and move["hitboxes"][0]["height"] == "Low", "reach and hit height measured")
 	check(info["fingerprint"].length() == 16, "fingerprint computed")
+	check(info["moves"]["BigSuper"]["meter_bars"] == 1 and info["moves"]["BigSuper"]["requires_bars"] == 1, "SuperMove meter cost measured")
+	check(move["frames"]["damage"] == 40 and move["frames"]["hits"] == 1 and not move["frames"].has("max_damage"), "single hit damage")
 	fighter.free()
+	# Same group = one hit for the whole move (QuickSlash's 12 boxes); other groups add hits.
+	var groups = [{"start": 7, "damage": 120, "combo": 40}]
+	var one = Introspector._damage_summary(groups, [])
+	check(one["damage"] == 120 and one["hits"] == 1 and one["damage_in_combo"] == 40, "grouped hitboxes hit once")
+	groups.append({"start": 12, "damage": 60, "combo": 60})
+	var two = Introspector._damage_summary(groups, [{"looping": true}])
+	check(two["hits"] == 2 and two["damage"] == 120 and two["max_damage"] == 180 and two["looping"], "separate groups add up")
+	var text = Introspector.frames_text({"frames": {"startup": 7, "active": 1, "recovery": 12, "damage": 120, "hits": 1, "damage_in_combo": 40, "reach": 60}})
+	check(text == "startup 7, active 1, recovery 12, 120 dmg (40 in a combo), reach 60", "frames text: %s" % text)
+	check(Introspector.frames_text({"damage": {"damage": 200, "hits": 1}}) == "timing set by its code (simulate it), 200 dmg", "code-timed moves still show damage")
 
 
 func _test_http_parsing() -> void:

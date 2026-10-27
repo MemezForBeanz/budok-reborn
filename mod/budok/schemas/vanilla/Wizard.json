@@ -39,9 +39,9 @@
     },
     "ChargeDash": {
       "category": "movement",
-      "summary": "Super Dash — armored dash forward, covers large distance. Startup 8 ticks, actionable after ~22 ticks. Goes through single-hit attacks. Best option for closing large distances (200+ units).",
-      "beats": "goes through single-hit attacks (armor), covers the most ground of any movement. Use when FAR from opponent to close the gap.",
-      "loses_to": "8 tick startup (slow), loses to grabs and multi-hit moves. Punishable if predicted."
+      "summary": "Super Dash: a short wind-up (see its frames) followed by a long dash forward. Best for crossing large distances; beats backdashes.",
+      "beats": "backdashes and opponents far away",
+      "loses_to": "attacks and throws during the wind-up; punishable if predicted"
     },
     "Combust": {
       "category": "attack",
@@ -58,8 +58,8 @@
     "ConjureStorm": {
       "category": "attack",
       "range": "far",
-      "summary": "Conjure Storm — 3-hit storm, slow startup. Element/direction payload.",
-      "beats": "area control, multi-hit at range",
+      "summary": "Conjure Storm: two-hit storm with slow startup. Element/direction payload.",
+      "beats": "area control at range",
       "loses_to": "very slow startup, punishable up close",
       "risk": "high"
     },
@@ -76,27 +76,27 @@
     },
     "Dash": {
       "category": "movement",
-      "summary": "Dash — quick forward hop. Startup 1 tick (fastest movement option), actionable after ~10 ticks. Projectile invulnerable frames 0-4, hops over low attacks. Use to close distance quickly or dodge projectiles.",
-      "beats": "projectiles (invuln frames 0-4), low attacks (hops over). Fastest way to close distance.",
-      "loses_to": "short distance covered, loses to well-timed attacks."
+      "summary": "Dash: a quick forward hop; actionable early (see its frames). Use it to close distance fast.",
+      "beats": "backdashes; slow approaches",
+      "loses_to": "well-timed attacks and anti-airs; covers less ground than Super Dash"
     },
     "DashBackward": {
       "category": "movement",
-      "summary": "Walk Back — retreat from opponent. Startup 2 ticks, actionable after ~11 ticks. Grab immune frames 1-7. Becomes inactionable if opponent uses forward movement.",
-      "beats": "escapes close-range pressure, grab immune early frames. Creates space for zoning.",
-      "loses_to": "gives up stage position, can get cornered at stage edge. Inactionable if opponent dashes forward."
+      "summary": "Dash Back: quick retreat. It cannot end early while the opponent's forward dash (or another move that beats backdashes) is running.",
+      "beats": "close-range pressure and throws by moving out of range; creates space",
+      "loses_to": "forward dashes that chase it; gives up stage space and can corner you"
     },
     "DashForward": {
       "category": "movement",
-      "summary": "Walk Forward — close distance toward opponent. Distance payload (0-100) controls how far. Startup 2 ticks, actionable after ~10-15 ticks. Essential for getting into attack range when your moves can't reach.",
-      "beats": "closes gap so your attacks can connect. Use when OUT OF RANGE for melee attacks. Walk into attack range, THEN attack next turn.",
-      "loses_to": "vulnerable during movement, predictable if repeated. Opponent can anti-air or attack your approach."
+      "summary": "Dash Forward: quick grounded dash toward the opponent; the payload (0-100) sets how far. While it runs, an opponent's backdash cannot end early. Use it to get into attack or throw range, then attack next turn.",
+      "beats": "backdashes; closes the gap so your attacks can connect",
+      "loses_to": "attacks timed against your approach; predictable if repeated"
     },
     "DefensiveBurst": {
       "category": "defense",
-      "summary": "Burst — invincible reversal, costs burst stock. Emergency escape.",
-      "beats": "escapes combos and pressure",
-      "loses_to": "limited stock (usually 1-2 per match), huge loss if baited"
+      "summary": "Burst: an invulnerable reversal that knocks the opponent away; your way out of combos and pressure. Spends your burst stock (at most one at a time); the burst meter refills over time and faster when you take damage.",
+      "beats": "combos and close pressure",
+      "loses_to": "being baited (the opponent blocks or backs off and punishes); afterwards you have no burst until the meter refills"
     },
     "DoubleJump": {
       "category": "movement",
@@ -137,9 +137,10 @@
     },
     "Grab": {
       "category": "grab",
-      "summary": "Throw — beats blocking, loses to attacks. h_reach ~50 units. Must be close to opponent to connect. If opponent is out of range, close distance first with DashForward or Dash.",
-      "beats": "blocking opponents (grabs go through block).",
-      "loses_to": "loses to attacks (any attack beats grab), very short range (~50 units). Will whiff if opponent is further than 50 units."
+      "range": "close",
+      "summary": "Throw: grabs a grounded opponent. Beats blocking and parrying. Very short range: its box reaches only about 20 in front of your center (see its measured reach), so with the opponent's body you need a center distance of about 30 or less. Get in first with Dash Forward.",
+      "beats": "blocking and parrying opponents who are touching you",
+      "loses_to": "any attack that comes out first, jumps, and stepping or dashing back; whiffs at even a little distance"
     },
     "Gust": {
       "category": "special",
@@ -206,9 +207,9 @@
     },
     "OffensiveBurst": {
       "category": "attack",
-      "summary": "Burst Cancel — cancel current attack into pressure. Costs burst.",
-      "beats": "extends combos, creates mixups",
-      "loses_to": "costs burst stock, wasted if not in an attack"
+      "summary": "Burst Cancel: during your own combo, cancels your current attack so you can keep the combo going or reset pressure. Spends your burst stock (it refills over time).",
+      "beats": "opponents expecting the combo to end",
+      "loses_to": "nothing directly, but it spends the burst you may need to escape a combo later"
     },
     "Orb": {
       "category": "super",

@@ -38,10 +38,15 @@ DEFAULT_URL = "http://127.0.0.1:8765/mcp"
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "budok" / "tools.json"
 HTTP_TIMEOUT = 120
 NOT_RUNNING = -32000
+INTERNAL_ERROR = -32603
 
 
 class TokenRejected(ConnectionError):
     """The server answered 401: wrong or regenerated token."""
+
+
+class BadReply(Exception):
+    """The server answered, but not with JSON."""
 
 
 TOKEN_HELP = ("the budok token was rejected; remove --token from your client config so the bridge reads it from the game, "
@@ -137,7 +142,10 @@ class Bridge:
             with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
                 body = response.read().decode()
                 session = response.headers.get("Mcp-Session-Id")
-                return response.status, (json.loads(body) if body else None), session
+                try:
+                    return response.status, (json.loads(body) if body else None), session
+                except ValueError as error:
+                    raise BadReply(f"budok sent a reply that is not valid JSON ({error}); please report this") from error
         except urllib.error.HTTPError as error:
             body = error.read().decode(errors="replace")
             try:
@@ -201,6 +209,10 @@ class Bridge:
             self.send({"jsonrpc": "2.0", "id": message["id"], "error": {
                 "code": NOT_RUNNING,
                 "message": f"budok is not reachable at {self.url}: start YOMI Hustle with the budok mod ({error})"}})
+        except Exception as error:  # noqa: BLE001 - every request must get an answer, or the client waits forever
+            log(f"{method}: {error!r}")
+            if has_id:
+                self.send({"jsonrpc": "2.0", "id": message["id"], "error": {"code": INTERNAL_ERROR, "message": f"budok bridge: {error}"}})
 
     def forward(self, message: dict[str, Any]) -> Any:
         with self.session_lock:

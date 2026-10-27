@@ -19,6 +19,7 @@ const INSTRUCTIONS := """budok lets you play YOMI Hustle, a turn-based simultane
 Typical flow: get_status -> list_characters -> start_match (or let the player start one) -> claim_slot ->
 loop { wait_for_turn -> optionally describe_character / simulate a few candidate moves -> submit_action }.
 Both players choose at the same time; you never see the opponent's choice before the turn resolves.
+To keep turns small, call wait_for_turn with detail "compact" and fetch move notes with describe_character when needed.
 simulate previews a move on the real engine against an assumed opponent move. For modded characters without
 notes, read the annotate_character prompt and use introspect_character / read_source / submit_character_schema.
 Knowledge about the engine and modding conventions is available as resources (yomi://knowledge/...)."""

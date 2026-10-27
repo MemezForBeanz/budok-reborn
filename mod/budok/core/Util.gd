@@ -85,8 +85,43 @@ static func random_hex(byte_count: int = 16) -> String:
 	return crypto.generate_random_bytes(byte_count).hex_encode()
 
 
+# Godot prints NaN and infinity as bare nan / inf, which is not JSON (clients
+# then drop the whole reply), so non-finite numbers become null.
 static func json_str(value, sorted: bool = false, indent: String = "") -> String:
-	return JSON.print(value, indent, sorted)
+	var text = JSON.print(value, indent, sorted)
+	if _has_non_finite(text):
+		text = JSON.print(finite(value), indent, sorted)
+	return text
+
+
+static func _has_non_finite(text: String) -> bool:
+	for token in ["nan", "inf"]:
+		var at = text.find(token)
+		while at != -1:
+			var start = at - 1 if at > 0 and text[at - 1] != "-" else at - 2
+			var before = text[start] if start >= 0 else ""
+			var after = text[at + token.length()] if at + token.length() < text.length() else ""
+			if before in [":", ",", "[", " ", "\t", "\n"] and after in ["", ",", "}", "]", " ", "\t", "\n", "\r"]:
+				return true
+			at = text.find(token, at + 1)
+	return false
+
+
+static func finite(value):
+	match typeof(value):
+		TYPE_REAL:
+			return null if is_nan(value) or is_inf(value) else value
+		TYPE_DICTIONARY:
+			var out = {}
+			for key in value:
+				out[key] = finite(value[key])
+			return out
+		TYPE_ARRAY:
+			var out_array = []
+			for item in value:
+				out_array.append(finite(item))
+			return out_array
+	return value
 
 
 static func json_parse(text: String) -> Dictionary:

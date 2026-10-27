@@ -48,6 +48,12 @@ already measured the mechanics. You add meaning.
 - `range`: close, mid, far, fullscreen or any. `risk`: low, medium or high.
 - Text fields up to 600 characters each. Lists up to 8 items.
 - Do **not** include startup, damage, frames or meter. They are measured and would be ignored.
+  Keep numbers out of the text fields too: players already see the measured values, and a wrong number
+  in a note misleads them. If a number matters (a lunge distance, a charge count), check it with
+  `simulate` first.
+- Hitboxes are not hits. Hitboxes that share a `group` hit at most once per move together (a slash can
+  use twelve boxes along its path and still hit once); only boxes in different groups, or `looping`
+  boxes, hit again. The skeleton's `hits` already counts this.
 
 ## Quality checklist
 

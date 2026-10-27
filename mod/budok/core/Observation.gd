@@ -9,6 +9,7 @@ const Util = preload("res://budok/core/Util.gd")
 const Introspector = preload("res://budok/core/Introspector.gd")
 const ACTION_TYPES := ["Movement", "Attack", "Special", "Super", "Defense", "Hurt"]
 const PROJECTILE_BASE := "res://projectile/BaseProjectile.gd"
+const CORNER_DISTANCE := 60
 
 
 static func fighter_of(game, slot: String):
@@ -20,7 +21,8 @@ static func other(slot: String) -> String:
 
 
 # detail: "summary" (per-turn) or "full" (everything, including raw resources).
-static func build(game, slot: String, infos: Dictionary, history: Array, detail: String = "summary") -> Dictionary:
+# motion: measured movement per tick of objects, by instance id (MatchController).
+static func build(game, slot: String, infos: Dictionary, history: Array, detail: String = "summary", motion: Dictionary = {}) -> Dictionary:
 	var me = fighter_of(game, slot)
 	var opp = fighter_of(game, other(slot))
 	var me_obs = fighter(me, slot, infos.get(slot, {}), detail)
@@ -39,11 +41,29 @@ static func build(game, slot: String, infos: Dictionary, history: Array, detail:
 			"opponent_is": "right" if dx > 0 else ("left" if dx < 0 else "same_x"),
 			"opponent_above": dy < 0,
 		},
-		"objects": objects(game, me),
+		"objects": objects(game, me, motion),
 		"stage": stage(game),
 		"history": history.slice(max(0, history.size() - (12 if detail == "full" else 5)), history.size() - 1) if not history.empty() else [],
 	}
 	return obs
+
+
+# The few fields worth reading every turn when the situation text is not enough.
+static func compact(obs: Dictionary) -> Dictionary:
+	var out = {"spacing": obs["spacing"], "history": obs["history"]}
+	for who in ["me", "opponent"]:
+		var f = obs[who]
+		var slim = {"hp": f["hp"], "position": f["position"], "state": f["state"]["name"], "meter_bars": f["meter"]["bars"],
+			"burst": f["burst"], "grounded": f["grounded"]}
+		for key in ["hitlag", "busy", "combo_count"]:
+			if f.get(key):
+				slim[key] = f[key]
+		if f.has("wall_distance"):
+			slim["wall_distance"] = f["wall_distance"]
+		out[who] = slim
+	if not obs["objects"].empty():
+		out["objects"] = obs["objects"]
+	return out
 
 
 static func fighter(f, slot: String, info: Dictionary, detail: String) -> Dictionary:
@@ -51,6 +71,7 @@ static func fighter(f, slot: String, info: Dictionary, detail: String) -> Dictio
 		return {"slot": slot, "missing": true, "position": {"x": 0, "y": 0}}
 	var state = Util.call_or(f, "current_state")
 	var bar_size = Util.as_int(Util.constant(f, "MAX_SUPER_METER", 125))
+	var position = Util.xy(Util.call_or(f, "get_pos", [], Vector2.ZERO))
 	var obs = {
 		"slot": slot,
 		"character": info.get("character", str(Util.prop(f, "name", ""))),
@@ -64,7 +85,7 @@ static func fighter(f, slot: String, info: Dictionary, detail: String) -> Dictio
 		"burst": Util.as_int(Util.prop(f, "bursts_available", 0)),
 		"free_cancels": Util.as_int(Util.prop(f, "feints", 0)),
 		"air_options": Util.as_int(Util.prop(f, "air_movements_left", 0)),
-		"position": Util.xy(Util.call_or(f, "get_pos", [], Vector2.ZERO)),
+		"position": position,
 		"velocity": Util.xy(Util.call_or(f, "get_vel", [], Vector2.ZERO)),
 		"facing": "right" if Util.as_int(Util.call_or(f, "get_facing_int", [], 1)) == 1 else "left",
 		"grounded": bool(Util.call_or(f, "is_grounded", [], true)),
@@ -84,6 +105,12 @@ static func fighter(f, slot: String, info: Dictionary, detail: String) -> Dictio
 		obs["state"]["title"] = title
 	if bool(Util.prop(state, "is_hurt_state", false)):
 		obs["state"]["hurt"] = true
+	if obs["burst"] == 0:
+		var burst_max = float(Util.as_int(Util.constant(f, "MAX_BURST_METER", 1500)))
+		obs["burst_progress"] = int(100.0 * Util.as_int(Util.prop(f, "burst_meter", 0)) / burst_max) if burst_max > 0 else 0
+	var walls = wall_distance(f, position)
+	if not walls.empty():
+		obs["wall_distance"] = walls
 	var penalty = Util.as_int(Util.prop(f, "penalty_ticks", 0))
 	if penalty > 0:
 		obs["defense_penalty"] = penalty
@@ -109,7 +136,21 @@ static func _resources(f, info: Dictionary, detail: String) -> Dictionary:
 	return out
 
 
-static func objects(game, me) -> Array:
+# Gap between the fighter's body (collision box) and each wall. Walls stand at
+# -stage_width and +stage_width, and bodies stop when their edge reaches one.
+static func wall_distance(f, position: Dictionary) -> Dictionary:
+	var half_width = Util.as_int(Util.prop(f, "stage_width", 0))
+	if half_width <= 0:
+		return {}
+	var box = Util.call_or(f, "get_collision_box", [], {})
+	var left_edge = Util.as_int(box.get("x1", position["x"])) if box is Dictionary else position["x"]
+	var right_edge = Util.as_int(box.get("x2", position["x"])) if box is Dictionary else position["x"]
+	return {"left": int(max(0, left_edge + half_width)), "right": int(max(0, half_width - right_edge))}
+
+
+# Velocity is the measured movement per tick when known: many projectiles move
+# by setting their position directly each tick and keep a physics velocity of 0.
+static func objects(game, me, motion: Dictionary = {}) -> Array:
 	var result = []
 	var list = Util.prop(game, "objects", [])
 	if not (list is Array):
@@ -129,6 +170,9 @@ static func objects(game, me) -> Array:
 			"position": Util.xy(Util.call_or(obj, "get_pos", [], Vector2.ZERO)),
 			"velocity": Util.xy(Util.call_or(obj, "get_vel", [], Vector2.ZERO)),
 		}
+		var moved = motion.get(obj.get_instance_id())
+		if moved != null and (moved["x"] != 0 or moved["y"] != 0):
+			entry["velocity"] = moved
 		if Util.valid(state):
 			entry["state"] = str(Util.prop(state, "state_name", state.name))
 		result.append(entry)
@@ -136,9 +180,12 @@ static func objects(game, me) -> Array:
 	return result
 
 
+# stage_width is a half-width: the floor runs from -stage_width to +stage_width.
 static func stage(game) -> Dictionary:
+	var half_width = Util.as_int(Util.prop(game, "stage_width", 0))
 	return {
-		"width": Util.as_int(Util.prop(game, "stage_width", 0)),
+		"left_wall": -half_width,
+		"right_wall": half_width,
 		"has_ceiling": bool(Util.prop(game, "has_ceiling", false)),
 		"ceiling_height": Util.as_int(Util.prop(game, "ceiling_height", 0)),
 	}
@@ -158,6 +205,16 @@ static func situation(obs: Dictionary) -> String:
 	lines.append("You: state %s, %d meter bars, burst %d, %d free cancels. Opponent: state %s%s, %d bars, burst %d." % [
 		me["state"]["name"], me["meter"]["bars"], me["burst"], me["free_cancels"],
 		opp["state"]["name"], " (hurt)" if opp["state"].get("hurt", false) else "", opp["meter"]["bars"], opp["burst"]])
+	for who in [["You are", me], ["The opponent is", opp]]:
+		var walls = who[1].get("wall_distance", {})
+		for side in walls:
+			if walls[side] <= CORNER_DISTANCE:
+				lines.append("%s %s the %s wall (%d away)." % [who[0], "against" if walls[side] <= 5 else "near", side, walls[side]])
+	if me["hitlag"] > 0:
+		lines.append("You are in hitlag for %d more ticks: a move you pick now starts after that." % me["hitlag"])
+	if opp["busy"]:
+		lines.append(("The opponent is being hit (%s): no new move for them this turn, only DI or a burst." if opp["state"].get("hurt", false)
+			else "The opponent is mid-move (%s) and cannot start a new move this turn.") % opp["state"]["name"])
 	if me["combo_count"] > 0:
 		lines.append("You are comboing the opponent (%d hits)." % me["combo_count"])
 	if opp["combo_count"] > 0:

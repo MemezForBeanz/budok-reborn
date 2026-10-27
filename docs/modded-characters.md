@@ -7,8 +7,9 @@ For any character the game can load, vanilla or modded, budok instances the char
 
 - every selectable state: title, type, air rules, air option use, meter required and spent, cancel
   categories, combo-only and neutral-only rules, reversible and feintable;
-- hitboxes: startup, active frames, recovery (from `iasa_at`), damage, hitstun, reach and vertical span,
-  hit height, throw, guard break, knockdown, wall slam and follow-ups;
+- hitboxes: startup, active frames, recovery (from `iasa_at`), damage per hit (hitboxes in the same
+  `group` count as one hit), damage in combos, number of hits, hitstun, reach and vertical span, hit
+  height, throw, guard break, knockdown, wall slam and follow-ups;
 - payload presence and, at turn time, the exact payload spec from the live UI controls;
 - custom script variables (anything the character adds on top of `BaseChar`), exposed as resources;
 - character extras (from the character's extras panel), with their live availability;

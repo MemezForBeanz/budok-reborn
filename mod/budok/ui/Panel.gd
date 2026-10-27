@@ -5,34 +5,46 @@ extends CanvasLayer
 
 const Util = preload("res://budok/core/Util.gd")
 const SettingsView = preload("res://budok/ui/SettingsView.gd")
+# The game's own UI theme (small pixel font). The game draws at 640x360 and
+# scales up, so Godot's default theme would be several times too big.
+const GAME_THEME := "res://theme.tres"
+const WIDTH := 420
 
 var runtime = null
 var view = null
 var _root: PanelContainer = null
 var _toggle: Button = null
+var _show_button := true
 var _refresh_timer := 0.0
 
 
 func setup(runtime_ref) -> void:
 	runtime = runtime_ref
 	layer = 120
+	var game_theme = load(GAME_THEME) if ResourceLoader.exists(GAME_THEME) else null
+	# Anchored top-right; the button grows leftwards to fit its text.
 	_toggle = Button.new()
 	_toggle.text = "budok"
+	_toggle.theme = game_theme
 	_toggle.anchor_left = 1.0
 	_toggle.anchor_right = 1.0
-	_toggle.margin_left = -70
+	_toggle.margin_left = -4
 	_toggle.margin_right = -4
-	_toggle.margin_top = 4
-	_toggle.margin_bottom = 26
+	_toggle.margin_top = 2
+	_toggle.margin_bottom = 2
+	_toggle.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_toggle.connect("pressed", self, "toggle")
 	add_child(_toggle)
+	# Right side of the screen, full height below the button.
 	_root = PanelContainer.new()
+	_root.theme = game_theme
 	_root.anchor_left = 1.0
 	_root.anchor_right = 1.0
-	_root.margin_left = -560
+	_root.anchor_bottom = 1.0
+	_root.margin_left = -WIDTH - 4
 	_root.margin_right = -4
-	_root.margin_top = 30
-	_root.margin_bottom = 620
+	_root.margin_top = 18
+	_root.margin_bottom = -4
 	add_child(_root)
 	var tabs = TabContainer.new()
 	_root.add_child(tabs)
@@ -50,7 +62,7 @@ func toggle() -> void:
 
 
 func _on_status_changed() -> void:
-	_toggle.visible = bool(runtime.config.get_value("ui.show_button", true))
+	_show_button = bool(runtime.config.get_value("ui.show_button", true))
 	if _root.visible:
 		view.refresh_status()
 
@@ -64,6 +76,9 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	# The Mod List already shows these settings, and the button would cover
+	# its title bar.
+	_toggle.visible = _show_button and not (runtime.mod_menu != null and runtime.mod_menu.showing())
 	if not _root.visible:
 		return
 	_refresh_timer += delta

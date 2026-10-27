@@ -57,7 +57,7 @@ static func enumerate(buttons, fighter) -> Dictionary:
 			"action": action,
 			"title": str(Util.prop(state, "title", action)) if Util.valid(state) else ("Hold" if action == "Continue" else action),
 			"type": Util.enum_name(ACTION_TYPES, Util.prop(state, "type", 0)) if Util.valid(state) else "Movement",
-			"reversible": bool(Util.prop(button, "reversible", false)),
+			"reversible": _reversible(button),
 			"feintable": _can_feint(buttons, state),
 		}
 		var payload = PayloadSpec.public_spec(spec)
@@ -85,6 +85,8 @@ static func resolve(buttons, fighter, catalog: Dictionary, action: String, data,
 	var state = catalog["states"][action]
 	if Util.valid(state) and state.has_method("is_usable") and not state.is_usable():
 		return {"ok": false, "error": "action '%s' is not usable right now (resources or requirements)" % action}
+	if touch_ui:
+		_face_data_node(catalog["controls"][action], fighter, _wants_reverse(buttons, action, extra))
 	var data_result = PayloadSpec.coerce(catalog["specs"][action], data, catalog["controls"][action] if touch_ui else null)
 	if not data_result["ok"]:
 		return {"ok": false, "error": "data: %s" % data_result["error"]}
@@ -99,6 +101,27 @@ static func resolve(buttons, fighter, catalog: Dictionary, action: String, data,
 
 static func submit(buttons, action: String, data, extra: Dictionary) -> void:
 	buttons.on_action_submitted(action, data, extra)
+
+
+static func _wants_reverse(buttons, action: String, extra) -> bool:
+	if not (extra is Dictionary):
+		return false
+	for key in extra:
+		if str(key).to_lower() == "reverse":
+			return bool(extra[key]) and _reversible(_button_for(buttons, action))
+	return false
+
+
+# The game's panel turns a move's aim controls toward the opponent, or away
+# from them when Reverse is ticked (ActionButtons.send_ui_action); do the same
+# before setting a value, so aim limits and allowed directions match the UI.
+static func _face_data_node(data_node, fighter, reverse: bool) -> void:
+	if not Util.valid(data_node) or not data_node.has_method("get_facing") or not data_node.has_method("set_facing"):
+		return
+	var current = data_node.get_facing()
+	var wanted = Util.as_int(Util.call_or(fighter, "get_opponent_dir", [], 0)) * (-1 if reverse else 1)
+	if current != null and wanted != 0 and int(current) != wanted:
+		data_node.set_facing(wanted)
 
 
 static func _resolve_extra(buttons, _fighter, catalog: Dictionary, action: String, state, requested: Dictionary, touch_ui: bool) -> Dictionary:
@@ -131,7 +154,7 @@ static func _resolve_extra(buttons, _fighter, catalog: Dictionary, action: Strin
 				return {"ok": false, "error": "extra.di: %s" % di["error"]}
 			extra["DI"] = di["value"]
 		elif lower == "reverse":
-			if bool(value) and not bool(Util.prop(_button_for(buttons, action), "reversible", false)):
+			if bool(value) and not _reversible(_button_for(buttons, action)):
 				return {"ok": false, "error": "'%s' cannot be reversed" % action}
 			extra["reverse"] = bool(value)
 		elif lower == "feint":
@@ -234,6 +257,13 @@ static func _can_feint(buttons, state) -> bool:
 		return false
 	var fighter_extra = Util.prop(buttons, "fighter_extra", null)
 	return bool(state.can_feint()) and bool(Util.prop(fighter_extra, "can_feint", true))
+
+
+# Same check as the game's panel: some buttons decide per situation.
+static func _reversible(button) -> bool:
+	if Util.valid(button) and button.has_method("is_reversible"):
+		return bool(button.is_reversible())
+	return bool(Util.prop(button, "reversible", false))
 
 
 static func _button_for(buttons, action: String):

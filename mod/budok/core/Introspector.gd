@@ -145,8 +145,10 @@ func _describe_state(state) -> Dictionary:
 	var hitboxes = []
 	var startup = -1
 	var active_end = -1
-	var total_damage = 0
 	var reach = -1
+	# Hitboxes with the same group number share one hit per move (the game marks
+	# the victim as hit for the whole group), so a move hits once per group.
+	var groups = {}
 	for child in state.get_children():
 		if not (Util.has_prop(child, "hitstun_ticks") and Util.has_prop(child, "start_tick") and Util.has_prop(child, "damage")):
 			continue
@@ -154,13 +156,25 @@ func _describe_state(state) -> Dictionary:
 		hitboxes.append(box)
 		if box["type"] == "Detect":
 			continue
-		total_damage += box["damage"]
+		var group = groups.get(box["group"], {"start": box["start"], "damage": 0, "combo": 0})
+		group["start"] = int(min(group["start"], box["start"]))
+		group["damage"] = int(max(group["damage"], box["damage"]))
+		group["combo"] = int(max(group["combo"], box.get("damage_in_combo", box["damage"])))
+		groups[box["group"]] = group
 		reach = int(max(reach, box.get("reach", -1)))
 		if startup == -1 or box["start"] < startup:
 			startup = box["start"]
 		active_end = int(max(active_end, box["start"] + box["active"] - 1))
+	# Meter: every state has super_level_ / supers_used_ (CharState); supers that
+	# extend SuperMove also need and spend super_level / supers_used (default 1).
 	var super_level = Util.as_int(Util.prop(state, "super_level_", 0))
 	var supers_used = Util.as_int(Util.prop(state, "supers_used_", -1))
+	var meter_bars = supers_used if supers_used >= 0 else super_level
+	if Util.has_prop(state, "super_level") and Util.has_prop(state, "supers_used"):
+		var move_level = Util.as_int(state.super_level)
+		var move_used = Util.as_int(state.supers_used)
+		meter_bars += move_used if move_used >= 0 else move_level
+		super_level = int(max(super_level, move_level))
 	var chain = Util.script_chain(state)
 	var title = str(Util.prop(state, "title", ""))
 	# A state can be picked only if it is shown and lists the cancel categories
@@ -174,7 +188,7 @@ func _describe_state(state) -> Dictionary:
 		"selectable": selectable,
 		"air": Util.enum_name(AIR_TYPES, Util.prop(state, "air_type", 0)),
 		"uses_air_option": bool(Util.prop(state, "uses_air_movement", false)),
-		"meter_bars": supers_used if supers_used >= 0 else super_level,
+		"meter_bars": meter_bars,
 		"requires_bars": super_level,
 		"length": anim_length,
 		"actionable_at": iasa,
@@ -195,11 +209,14 @@ func _describe_state(state) -> Dictionary:
 			"startup": startup,
 			"active": active_end - startup + 1,
 			"recovery": int(max(0, iasa - active_end)),
-			"hits": hitboxes.size(),
-			"total_damage": total_damage,
 		}
+		info["frames"].merge(_damage_summary(groups.values(), hitboxes))
 		if reach >= 0:
 			info["frames"]["reach"] = reach
+	elif not groups.empty():
+		# Hitboxes left at start_tick 0 are switched on by the move's code: the
+		# damage is known, the timing is not.
+		info["damage"] = _damage_summary(groups.values(), hitboxes)
 	var projectile = Util.prop(state, "projectile_scene", null)
 	if projectile != null and Util.has_prop(projectile, "resource_path"):
 		info["projectile"] = {"scene": str(projectile.resource_path), "spawn_tick": Util.as_int(Util.prop(state, "projectile_tick", 1))}
@@ -208,16 +225,66 @@ func _describe_state(state) -> Dictionary:
 	for marker in DYNAMIC_MARKERS:
 		if source.find(marker) != -1:
 			dynamic.append(marker)
+	if info.has("damage"):
+		dynamic.append("hitboxes timed by code")
 	if not dynamic.empty() or (hitboxes.empty() and info["type"] in ["Attack", "Special", "Super"]):
 		info["dynamic"] = true
 		info["dynamic_hints"] = dynamic
 	return info
 
 
+# One-line frame data for move lists: "startup 7, active 1, recovery 12, 120 dmg
+# (40 in a combo), reach 60".
+# A move with hitboxes switched on by code (only "damage" measured) reads
+# "timing set by its code (simulate it), 200 dmg".
+static func frames_text(move: Dictionary) -> String:
+	if not move.has("frames"):
+		return "timing set by its code (simulate it), " + damage_text(move.get("damage", {}))
+	var frames = move["frames"]
+	var text = "startup %d, active %d, recovery %d, %s" % [frames.get("startup", 0), frames.get("active", 0), frames.get("recovery", 0), damage_text(frames)]
+	if frames.has("reach"):
+		text += ", reach %d" % frames["reach"]
+	return text
+
+
+static func damage_text(summary: Dictionary) -> String:
+	var text = "%d dmg" % summary.get("damage", 0)
+	if summary.get("hits", 1) > 1:
+		text = "%d hits, %d dmg first, up to %d" % [summary["hits"], summary.get("damage", 0), summary.get("max_damage", 0)]
+	if summary.has("damage_in_combo"):
+		text += " (%d in a combo)" % summary["damage_in_combo"]
+	if summary.get("looping", false):
+		text += ", repeats while active"
+	return text
+
+
+# Base damage of the first hit, damage when the move lands mid-combo, number of
+# separate hits and the most all of them can do. Real numbers are lower in
+# combos (scaling); simulations show them exactly.
+static func _damage_summary(groups: Array, hitboxes: Array) -> Dictionary:
+	var first = null
+	var max_damage = 0
+	for group in groups:
+		max_damage += group["damage"]
+		if first == null or group["start"] < first["start"]:
+			first = group
+	var out = {"damage": first["damage"] if first != null else 0, "hits": groups.size()}
+	if first != null and first["combo"] != first["damage"]:
+		out["damage_in_combo"] = first["combo"]
+	if groups.size() > 1:
+		out["max_damage"] = max_damage
+	for box in hitboxes:
+		if box.get("looping", false):
+			out["looping"] = true
+			break
+	return out
+
+
 func _describe_hitbox(box) -> Dictionary:
 	var info = {
 		"type": Util.enum_name(HITBOX_TYPES, Util.prop(box, "hitbox_type", 0)),
 		"damage": Util.as_int(Util.prop(box, "damage", 0)),
+		"group": Util.as_int(Util.prop(box, "group", 0)),
 		"start": Util.as_int(Util.prop(box, "start_tick", 0)),
 		"active": Util.as_int(Util.prop(box, "active_ticks", 0)),
 		"hitstun": Util.as_int(Util.prop(box, "hitstun_ticks", 0)),
@@ -235,6 +302,9 @@ func _describe_hitbox(box) -> Dictionary:
 		var half_h = Util.as_int(Util.prop(box, "height", 0))
 		info["reach"] = bx + half_w
 		info["vertical"] = [by - half_h, by + half_h]
+	var in_combo = Util.as_int(Util.prop(box, "damage_in_combo", -1))
+	if in_combo >= 0 and in_combo != info["damage"]:
+		info["damage_in_combo"] = in_combo
 	if Util.has_prop(box, "throw_state"):
 		info["throw"] = true
 	for flag in ["guard_break", "knockdown", "hard_knockdown", "wall_slam", "hits_otg", "always_on", "looping"]:

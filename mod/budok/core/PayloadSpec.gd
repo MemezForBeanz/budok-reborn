@@ -15,7 +15,25 @@ const DIRECTION_VECTORS := {
 	"W": [-1, 0], "Neutral": [0, 0], "E": [1, 0],
 	"SW": [-1, 1], "S": [0, 1], "SE": [1, 1],
 }
+# Other spellings bots use for the eight directions (screen directions).
+const DIRECTION_ALIASES := {
+	"up": "N", "down": "S", "left": "W", "right": "E", "none": "Neutral", "center": "Neutral",
+	"north": "N", "south": "S", "west": "W", "east": "E",
+	"northwest": "NW", "northeast": "NE", "southwest": "SW", "southeast": "SE",
+	"upleft": "NW", "upright": "NE", "downleft": "SW", "downright": "SE",
+	"leftup": "NW", "rightup": "NE", "leftdown": "SW", "rightdown": "SE",
+}
 const XY_RANGE := 100
+# How to fill each payload type; sent once per turn (payload_help), not per move.
+const TYPE_HELP := {
+	"xy": "{\"x\": int, \"y\": int}, each -100..100, screen space like the aim arrow on screen: +x right, -x left, -y up, +y down. It does not flip when you face left or reverse.",
+	"direction8": "a direction name: N, NE, E, SE, S, SW, W, NW or Neutral (screen directions, N = up, W = left). Only the listed ones are allowed; the list is for facing the opponent and mirrors with reverse.",
+	"int": "a whole number between min and max.",
+	"bool": "true or false.",
+	"option": "one of the choices, by name.",
+	"object": "an object with one value per field, each filled by its own type.",
+	"opaque": "a value shaped like the default (a custom control budok cannot interpret); omit data to use the default.",
+}
 
 
 static func describe_data_node(data_node) -> Dictionary:
@@ -86,14 +104,13 @@ static func public_spec(spec: Dictionary):
 		"none":
 			return null
 		"xy":
-			var out = {"type": "xy", "x": [-XY_RANGE, XY_RANGE], "y": [-XY_RANGE, XY_RANGE], "default": spec["default"]}
+			var out = {"type": "xy", "default": spec["default"]}
 			if bool(spec.get("limit_angle", false)):
-				out["note"] = "angle limited around %s deg (+/- %s); out-of-range values are clamped" % [
-					spec.get("limit_center_degrees", 0), spec.get("limit_range_degrees", 0)]
+				out["note"] = "aim limited to +/- %s deg around your forward side (the side you face after reverse); values outside are clamped" % [
+					spec.get("limit_range_degrees", 0)]
 			return out
 		"direction8":
-			return {"type": "direction8", "allowed": spec["allowed"], "default": spec["default"],
-				"note": "pass a direction name (screen directions, N = up)"}
+			return {"type": "direction8", "allowed": spec["allowed"], "default": spec["default"]}
 		"int_field":
 			return {"type": "int", "min": spec["min"], "max": spec["max"], "default": spec["default"][spec["key"]],
 				"wraps_as": spec["key"]}
@@ -112,12 +129,29 @@ static func public_spec(spec: Dictionary):
 	return null
 
 
+# TYPE_HELP for the payload types used by these public action entries.
+static func help_for(actions: Array) -> Dictionary:
+	var help = {}
+	for action in actions:
+		_collect_help(action.get("payload"), help)
+	return help
+
+
+static func _collect_help(payload, help: Dictionary) -> void:
+	if not (payload is Dictionary) or not payload.has("type"):
+		return
+	help[payload["type"]] = TYPE_HELP.get(payload["type"], "")
+	for field in payload.get("fields", {}).values():
+		_collect_help(field, help)
+
+
 # Returns {"ok": true, "value": v} or {"ok": false, "error": msg}. `control` is
 # the live UI node for this spec (used to clamp values exactly like the game).
 static func coerce(spec: Dictionary, value, control = null) -> Dictionary:
 	var kind = spec.get("kind", "none")
 	if kind == "none":
 		return {"ok": true, "value": null}
+	value = _unwrap(value)
 	if value == null:
 		if kind == "object":
 			value = {}
@@ -125,8 +159,10 @@ static func coerce(spec: Dictionary, value, control = null) -> Dictionary:
 			return {"ok": true, "value": _default_of(spec)}
 	match kind:
 		"xy":
+			if value is Array and value.size() == 2:
+				value = {"x": value[0], "y": value[1]}
 			if not (value is Dictionary) or not value.has("x") or not value.has("y"):
-				return _err("expected {\"x\": int, \"y\": int} in [-100, 100]")
+				return _err("expected {\"x\": int, \"y\": int} in [-100, 100], got %s" % _shown(value))
 			var x = clamp(Util.as_int(Util.numeric(value["x"])), -XY_RANGE, XY_RANGE)
 			var y = clamp(Util.as_int(Util.numeric(value["y"])), -XY_RANGE, XY_RANGE)
 			if Util.valid(control) and control.has_method("set_value_float") and Util.has_prop(control, "panel_radius"):
@@ -136,10 +172,17 @@ static func coerce(spec: Dictionary, value, control = null) -> Dictionary:
 			return {"ok": true, "value": {"x": int(x), "y": int(y)}}
 		"direction8":
 			var dir_name = _direction_name(value)
+			# The live picker knows the current allowed set (it mirrors with reverse).
+			var allowed = spec["allowed"]
+			if Util.valid(control) and control.has_method("get_value"):
+				allowed = []
+				for name in DIRECTIONS:
+					if bool(Util.prop(control, name, false)):
+						allowed.append(name)
 			if dir_name == "":
-				return _err("expected one of %s" % str(spec["allowed"]))
-			if not (dir_name in spec["allowed"]):
-				return _err("direction %s is not allowed here; allowed: %s" % [dir_name, str(spec["allowed"])])
+				return _err("expected a direction name, one of %s, got %s" % [str(allowed), _shown(value)])
+			if not (dir_name in allowed):
+				return _err("direction %s is not allowed here; allowed: %s" % [dir_name, str(allowed)])
 			if Util.valid(control) and control.has_method("get_value"):
 				return {"ok": true, "value": control.get_value(dir_name)}
 			var vec = DIRECTION_VECTORS[dir_name]
@@ -233,12 +276,35 @@ static func _same_shape(a, b) -> bool:
 	return true
 
 
-static func _direction_name(value) -> String:
+# Some clients send structured values as JSON text ("{\"x\": 10, ...}" or
+# "\"NW\""), because the data argument has no fixed type.
+static func _unwrap(value):
 	if value is String:
+		var text = value.strip_edges()
+		if text.begins_with("{") or text.begins_with("[") or text.begins_with("\""):
+			var parsed = Util.json_parse(text)
+			if parsed["ok"]:
+				return parsed["value"]
+	return value
+
+
+static func _shown(value) -> String:
+	return Util.truncate(Util.json_str(value), 80)
+
+
+static func _direction_name(value) -> String:
+	if value is Dictionary:
+		for key in ["direction", "dir", "value", "name"]:
+			if value.has(key):
+				return _direction_name(value[key])
+	if value is String:
+		var key = value.strip_edges().to_lower()
 		for dir_name in DIRECTIONS:
-			if dir_name.to_lower() == value.strip_edges().to_lower():
+			if dir_name.to_lower() == key:
 				return dir_name
-		return ""
+		for separator in ["-", "_", " "]:
+			key = key.replace(separator, "")
+		return DIRECTION_ALIASES.get(key, "")
 	if value is Dictionary and value.has("x") and value.has("y"):
 		var x = int(sign(Util.as_int(Util.numeric(value["x"]))))
 		var y = int(sign(Util.as_int(Util.numeric(value["y"]))))

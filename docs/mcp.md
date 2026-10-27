@@ -18,13 +18,13 @@ client tool timeouts. Supported protocol versions: `2025-06-18`, `2025-03-26` an
 |---|---|
 | `get_status` | Versions, server, match (characters, controllers, open turns, last result), AI settings, schema jobs. |
 | `list_characters` | Every playable character (vanilla, newer builds, mods), with schema status and notes coverage. |
-| `start_match` | `{p1, p2, controllers?, claim?, starting_hp?, settings?}`. Works from the menu or mid-match. By default you play P2 and the human plays P1. |
+| `start_match` | `{p1, p2, controllers?, claim?, starting_hp?, settings?}`. Works from the menu or mid-match. By default you play P2 and the human plays P1. Says which characters have no move notes yet (`notes_missing`), with how to write them. |
 | `set_controller` | Switch a slot between `human`, `mcp` and `ai` at any time. |
 | `claim_slot` / `release_slot` | Take or return a slot for this session. Unclaimed `mcp` slots stay playable by the human. |
-| `wait_for_turn` | Long-poll. Returns `your_turn` with `turn_token`, `situation` (plain text), `observation`, `legal_actions` (with payload specs, measured frames and notes) and `extras`. Can also return `waiting` (call again) or `match_over`. `detail: "full"` adds raw resources, full notes and the opponent's legal options. |
+| `wait_for_turn` | Long-poll. Returns `your_turn` with `turn_token`, `situation` (plain text), `observation`, `legal_actions` (with payload specs, measured frames and notes), `extras` and `payload_help` (how to fill each payload type). Can also return `waiting` (call again) or `match_over`. `detail`: `compact` (move names with payload types and a slim observation, about a fifth of the size), `summary` (default: short notes and frame data) or `full` (all notes, raw resources and the opponent's legal options). A turn where `Continue` is the only move is always minimal (`only_option`). |
 | `get_turn` | The open turn, without waiting. |
-| `simulate` | `{action, data?, extra?, opponent_action?, opponent_data?, opponent_extra?, ticks?}` runs a deterministic preview on the real engine from the current turn. It returns damage dealt and taken, end states, events, frame advantage and when each side can act next. The opponent's real choice is never used or revealed. |
-| `submit_action` | `{turn_token, action, data?, extra?}` validates (legal, usable, payload, extras) and locks in. With `wait_for_outcome` (default on) it waits for the turn to resolve and returns what happened, including the opponent's revealed move. On an error nothing is applied and you can retry with the same token. |
+| `simulate` | `{action, data?, extra?, opponent_action?, opponent_data?, opponent_extra?, ticks?}` runs a deterministic preview on the real engine from the current turn. It returns damage dealt and taken, end states, events (damage, state changes, spawned projectiles), objects still on screen with their speed per tick, frame advantage, when each side can act next, and `in_hitlag` when a fighter starts frozen in hitlag. The opponent's real choice is never used or revealed. |
+| `submit_action` | `{turn_token, action, data?, extra?}` validates (legal, usable, payload, extras) and locks in. With `wait_for_outcome` (default on) it waits, at most `mcp.max_wait_s`, for the turn to resolve and returns what happened, including the opponent's revealed move. If the outcome is still `pending` (a slow human opponent), call `wait_for_turn`. On an error nothing is applied and you can retry with the same token. Retrying a move that was already locked in (say, after a lost reply) returns `ok` with `already_applied` and the outcome; a different move returns `already_submitted`. |
 | `get_match_log` | Resolved turn history, decisions and result. |
 | `describe_character` | Measured data merged with notes for a character, a slot, or selected moves. |
 | `introspect_character` | Raw skeleton for writing notes (paged), optionally with the source of code-driven moves. |
@@ -40,16 +40,19 @@ client tool timeouts. Supported protocol versions: `2025-06-18`, `2025-03-26` an
 
 | Payload type | Value to send |
 |---|---|
-| `xy` | `{"x": -100..100, "y": -100..100}` in screen space (+y is down). Clamped like the UI clamps. |
-| `direction8` | A direction name: `"N"`, `"NE"` ... `"Neutral"`. |
+| `xy` | `{"x": -100..100, "y": -100..100}` in screen space, like the aim arrow on screen (+x right, +y down). It does not flip with facing or reverse. Clamped like the UI clamps (some aims are limited to the forward side). `[x, y]` also works. |
+| `direction8` | A direction name: `"N"`, `"NE"` ... `"Neutral"` (screen directions). `"up-left"`-style names and `{"direction": "NW"}` also work. The allowed list mirrors with reverse. |
 | `int` | A number. budok wraps it the way the game expects. |
 | `bool` | `true` or `false`. |
 | `option` | The option's name. |
 | `object` | An object with the listed `fields`, each following its own spec. |
 | `opaque` | A value shaped like `default`. |
 
+Clients that send `data` as JSON text (`"{\"x\": 10, \"y\": 0}"`) are understood too.
+
 `extra` accepts `di` (`{x, y}`, while being hit), `reverse`, `feint` and the character extras listed in
-the turn's `extras.character`. Unavailable extras are rejected.
+the turn's `extras.character`. Unavailable extras are rejected. `reverse` performs the move facing away
+from the opponent, so a reversed lunge travels away from them.
 
 ## Resources and prompts
 
@@ -61,8 +64,9 @@ the turn's `extras.character`. Unavailable extras are rejected.
 
 ## Turn rules worth knowing
 
-- A turn opens only when the game waits on that player. If you are mid-move you may get no turn while
-  the opponent does.
+- A decision point gives both players a turn. A player who is mid-move or being hit (`busy`) can only
+  `Continue` (plus DI or burst when hit). History entries mark such players with `busy` and the state
+  that kept running.
 - When `Continue` (Hold) is the only option and you are not being hit, budok submits it for you
   (`turns.forced_turns`).
 - Timeouts (`turns.timeout_s.mcp`, default off) play `turns.fallback_action`.
