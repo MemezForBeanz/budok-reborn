@@ -244,10 +244,11 @@ func _on_copy_desktop() -> void:
 		_on_copy_desktop_node()
 		return
 	var python = "python" if OS.get_name() == "Windows" else "python3"
-	var snippet = {"mcpServers": {"budok": {"command": python, "args": [runtime.bridge_path,
-		"--url", runtime.mcp.url(), "--token", str(runtime.config.get_value("mcp.auth_token", ""))]}}}
+	# The bridge sits next to budok's config and reads the token and port from
+	# it, so the copied config never goes stale when the token changes.
+	var snippet = {"mcpServers": {"budok": {"command": python, "args": [runtime.bridge_path]}}}
 	OS.set_clipboard(Util.json_str(snippet, false, "  "))
-	_say("Copied a claude_desktop_config.json snippet (needs Python 3). Merge its mcpServers entry into your config and restart Claude Desktop.")
+	_say("Copied a claude_desktop_config.json snippet (needs Python 3; no token inside, the bridge reads it from the game). Merge its mcpServers entry into your config and restart Claude Desktop.")
 
 
 func _on_copy_desktop_node() -> void:

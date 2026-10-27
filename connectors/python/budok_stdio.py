@@ -3,7 +3,14 @@
 
 Standard library only, no Node.js needed. Configure your client to run:
 
-    python3 /path/to/budok_stdio.py --token YOUR_TOKEN
+    python3 /path/to/budok_stdio.py
+
+The token (and port) are read from the game's own budok settings on this machine, so nothing needs
+copying and a regenerated token is picked up automatically. --token / --url override that.
+budok installs a copy of this file next to its settings when the game starts:
+    Linux    ~/.local/share/YourOnlyMoveIsHUSTLE/budok/budok_stdio.py
+    Windows  %APPDATA%/YourOnlyMoveIsHUSTLE/budok/budok_stdio.py
+    macOS    ~/Library/Application Support/YourOnlyMoveIsHUSTLE/budok/budok_stdio.py
 
 Behaviour on top of plain forwarding:
 - If the game restarts (new server, old session gone), the bridge re-initializes and retries,
@@ -17,6 +24,7 @@ Logs go to stderr (shown in the client's MCP log); stdout carries only JSON-RPC.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -36,7 +44,42 @@ class TokenRejected(ConnectionError):
     """The server answered 401: wrong or regenerated token."""
 
 
-TOKEN_HELP = "the budok token was rejected; copy it again from Mod List -> budok -> Connect and update your client config"
+TOKEN_HELP = ("the budok token was rejected; remove --token from your client config so the bridge reads it from the game, "
+              "or copy it again from Mod List -> budok -> Connect")
+GAME_DIR = "YourOnlyMoveIsHUSTLE"
+STEAM_APP_ID = "2212330"
+
+
+def settings_candidates() -> list[Path]:
+    """Where the game keeps user://budok/config.json on this machine (newest wins)."""
+    home = Path.home()
+    paths = [Path(__file__).resolve().parent / "config.json"]
+    if os.name == "nt":
+        paths.append(Path(os.environ.get("APPDATA", home / "AppData" / "Roaming")) / GAME_DIR / "budok" / "config.json")
+    elif sys.platform == "darwin":
+        paths.append(home / "Library" / "Application Support" / GAME_DIR / "budok" / "config.json")
+    else:
+        data_home = Path(os.environ.get("XDG_DATA_HOME", home / ".local" / "share"))
+        paths.append(data_home / GAME_DIR / "budok" / "config.json")
+        # Flatpak / Snap Steam, and the Windows build running under Proton.
+        paths.append(home / ".var/app/com.valvesoftware.Steam/.local/share" / GAME_DIR / "budok" / "config.json")
+        paths.append(home / "snap/steam/common/.local/share" / GAME_DIR / "budok" / "config.json")
+        for steam in (data_home / "Steam", home / ".steam/steam", home / ".var/app/com.valvesoftware.Steam/.local/share/Steam"):
+            pattern = steam / "steamapps/compatdata" / STEAM_APP_ID / "pfx/drive_c/users/*/AppData/Roaming" / GAME_DIR / "budok" / "config.json"
+            paths.extend(Path(p) for p in glob.glob(str(pattern)))
+    return paths
+
+
+def read_game_settings() -> dict[str, Any]:
+    found = [p for p in settings_candidates() if p.is_file()]
+    for path in sorted(found, key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            mcp = json.loads(path.read_text()).get("mcp", {})
+        except (OSError, ValueError):
+            continue
+        if mcp.get("auth_token"):
+            return {"token": mcp["auth_token"], "port": mcp.get("port", 8765), "path": str(path)}
+    return {}
 
 
 def log(message: str) -> None:
@@ -45,12 +88,34 @@ def log(message: str) -> None:
 
 class Bridge:
     def __init__(self, url: str, token: str) -> None:
-        self.url = url
+        self.explicit_url = url
+        self.explicit_token = token
+        self.url = url or DEFAULT_URL
         self.token = token
+        self.refresh_settings()
         self.session: str | None = None
         self.init_params: dict[str, Any] | None = None
         self.write_lock = threading.Lock()
         self.session_lock = threading.Lock()
+
+    def refresh_settings(self) -> bool:
+        """Re-reads token/port from the game's settings. Returns True if anything changed."""
+        if self.explicit_token and self.explicit_url:
+            return False
+        settings = read_game_settings()
+        if not settings:
+            if not self.explicit_token:
+                log("no budok settings found yet; start the game once with budok installed (or pass --token)")
+            return False
+        before = (self.url, self.token)
+        if not self.explicit_token:
+            self.token = settings["token"]
+        if not self.explicit_url:
+            self.url = f"http://127.0.0.1:{settings['port']}/mcp"
+        if (self.url, self.token) != before:
+            log(f"using budok settings from {settings['path']}")
+            return True
+        return False
 
     # --- output ---
 
@@ -82,8 +147,10 @@ class Bridge:
 
     def initialize_upstream(self) -> Any:
         """(Re)creates the server session using the client's original initialize params."""
-        status, reply, session = self.post({"jsonrpc": "2.0", "id": "bridge-init", "method": "initialize",
-                                            "params": self.init_params or {}})
+        init = {"jsonrpc": "2.0", "id": "bridge-init", "method": "initialize", "params": self.init_params or {}}
+        status, reply, session = self.post(init)
+        if status == 401 and self.refresh_settings():
+            status, reply, session = self.post(init)
         if status == 401:
             raise TokenRejected(TOKEN_HELP)
         if status != 200 or not isinstance(reply, dict) or "result" not in reply:
@@ -125,6 +192,7 @@ class Bridge:
             if has_id:
                 self.send({"jsonrpc": "2.0", "id": message["id"], "error": {"code": NOT_RUNNING, "message": TOKEN_HELP}})
         except (urllib.error.URLError, ConnectionError, OSError) as error:
+            self.refresh_settings()  # the game may come back on another port
             if not has_id:
                 return
             if method == "tools/list" and CACHE.is_file():
@@ -139,6 +207,9 @@ class Bridge:
             if self.session is None and self.init_params is not None:
                 self.initialize_upstream()
         status, reply, _ = self.post(message)
+        if status in (401, 404):
+            # The game may have restarted with a new port or token; pick up its settings.
+            self.refresh_settings()
         if status == 404 and self.init_params is not None:
             # Game restarted: the old session is gone. Reconnect once and retry.
             log("session expired (game restarted?), reconnecting")
@@ -148,7 +219,12 @@ class Bridge:
         if status == 202:
             return None
         if status == 401:
-            raise TokenRejected(TOKEN_HELP)
+            with self.session_lock:
+                self.session = None
+                self.initialize_upstream()
+            status, reply, _ = self.post(message)
+            if status == 401:
+                raise TokenRejected(TOKEN_HELP)
         return reply
 
     def offline_initialize(self, reason: str = "game not running") -> dict[str, Any]:
@@ -193,8 +269,8 @@ class Bridge:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--url", default=os.environ.get("BUDOK_URL", DEFAULT_URL))
-    parser.add_argument("--token", default=os.environ.get("BUDOK_TOKEN", ""))
+    parser.add_argument("--url", default=os.environ.get("BUDOK_URL", ""), help="default: from the game's settings")
+    parser.add_argument("--token", default=os.environ.get("BUDOK_TOKEN", ""), help="default: from the game's settings")
     args = parser.parse_args()
     url = args.url
     token = args.token
