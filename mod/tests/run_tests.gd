@@ -11,6 +11,7 @@ const Introspector = preload("res://budok/core/Introspector.gd")
 const HttpServer = preload("res://budok/mcp/HttpServer.gd")
 const Tools = preload("res://budok/mcp/Tools.gd")
 const Prompts = preload("res://budok/ai/Prompts.gd")
+const Memory = preload("res://budok/core/Memory.gd")
 
 var failures := 0
 var checks := 0
@@ -25,6 +26,7 @@ func _init() -> void:
 	_test_http_parsing()
 	_test_tool_catalogue()
 	_test_knowledge()
+	_test_memory()
 	print("%d checks, %d failures" % [checks, failures])
 	quit(failures)
 
@@ -98,6 +100,33 @@ func _test_payload_spec() -> void:
 	var opaque = PayloadSpec.describe_data_node(custom)
 	check(opaque["kind"] == "opaque" and opaque["default"] == "homing", "overridden get_data becomes opaque")
 	check(not PayloadSpec.coerce(opaque, 5)["ok"] and PayloadSpec.coerce(opaque, "x")["ok"], "opaque keeps the JSON type")
+	# SuperJump outside a combo: the aim pad is hidden and the move sends "homing".
+	var jump = make("func get_data():\n\treturn \"homing\"\n", "Control")
+	var arc = make("func get_data():\n\treturn {\"x\": 1, \"y\": 0}\n", "Control")
+	arc.visible = false
+	jump.add_child(arc)
+	var fixed = PayloadSpec.describe_data_node(jump)
+	var fixed_use = PayloadSpec.coerce(fixed, {"x": 5, "y": 5})
+	check(fixed["kind"] == "fixed" and fixed_use["value"] == "homing" and fixed_use.has("note"), "hidden controls mean a fixed value")
+	jump.free()
+	# The parry's Block Height: two toggle buttons, value derived from them.
+	var height = make("func get_data():\n\treturn {\"x\": 0, \"y\": 0 if get_node(\"High\").pressed else 1}\nfunc on_low(_on):\n\tget_node(\"High\").set_pressed_no_signal(false)\n\tget_node(\"Low\").set_pressed_no_signal(true)\n", "VBoxContainer")
+	for label in ["High", "Low"]:
+		var button = Button.new()
+		button.name = label
+		button.text = label
+		button.toggle_mode = true
+		height.add_child(button)
+	height.get_node("High").pressed = true
+	height.get_node("Low").connect("toggled", height, "on_low")
+	var choice = PayloadSpec.describe_control(height)
+	check(choice["kind"] == "choice" and choice["choices"] == ["High", "Low"] and choice["default_choice"] == "High", "button group becomes a choice")
+	check(height.get_node("High").pressed and not height.get_node("Low").pressed, "probing leaves the buttons as they were")
+	check(same(PayloadSpec.coerce(choice, "High")["value"], {"x": 0, "y": 0}), "choice value without touching the UI")
+	var low = PayloadSpec.coerce(choice, "low", height)
+	check(same(low["value"], {"x": 0, "y": 1}) and same(height.get_data(), {"x": 0, "y": 1}), "choice presses the button")
+	check(PayloadSpec.public_spec(choice)["choices"] == ["High", "Low"], "choice public spec")
+	height.free()
 	var dir_spec = {"kind": "direction8", "allowed": ["N", "E", "Neutral"], "default": "Neutral"}
 	check(same(PayloadSpec.coerce(dir_spec, "e")["value"], {"x": 1, "y": 0}), "direction names are case-insensitive")
 	check(not PayloadSpec.coerce(dir_spec, "SW")["ok"], "disallowed direction rejected")
@@ -205,6 +234,33 @@ func _test_introspector() -> void:
 	var text = Introspector.frames_text({"frames": {"startup": 7, "active": 1, "recovery": 12, "damage": 120, "hits": 1, "damage_in_combo": 40, "reach": 60}})
 	check(text == "startup 7, active 1, recovery 12, 120 dmg (40 in a combo), reach 60", "frames text: %s" % text)
 	check(Introspector.frames_text({"damage": {"damage": 200, "hits": 1}}) == "timing set by its code (simulate it), 200 dmg", "code-timed moves still show damage")
+
+
+func _test_memory() -> void:
+	var memory = Memory.new()
+	for name in ["Zed", "Yan"]:
+		memory.clear_for(name)
+	var saved = memory.remember("Zed", "", "Zed's teleport leaves him open for 10 ticks", ["punish"], "mcp:test")
+	check(saved["ok"] and saved["subject"] == "character:Zed", "memory saved under the character")
+	memory.remember("Zed", "Yan", "As Zed, zone Yan out with knives", [], "ai:model")
+	memory.remember("Yan", "", "Yan blocks low a lot", [], "mcp:other")
+	check(not memory.remember("Zed", "", "", [], "x")["ok"], "empty memory refused")
+	var long_text = ""
+	for _i in range(61):
+		long_text += "0123456789"
+	check(not memory.remember("Zed", "", long_text, [], "x")["ok"], "overlong memory refused")
+	var both = memory.recall(["Zed", "Yan"])
+	check(both.size() >= 3, "recall covers both characters and their matchup")
+	check(memory.recall(["Zed"], "knives").size() == 1, "recall finds the matchup of one character, filtered by text")
+	check(memory.recall(["Zed", "Yan"], "", 20, "mcp:test").size() == 1, "recall can be limited to one author")
+	check(memory.count_for("Zed") == 2, "count includes matchups")
+	check(memory.forget(saved["id"])["ok"] and memory.count_for("Zed") == 1, "forget removes one memory")
+	memory.max_per_subject = 2
+	for i in range(3):
+		memory.remember("Yan", "", "note %d" % i, [], "x")
+	check(memory.recall(["Yan"], "note").size() == 2, "oldest memories drop past the limit")
+	check(memory.clear_for("Yan") >= 2 and memory.count_for("Yan") == 0, "clear deletes a character's memories")
+	memory.clear_for("Zed")
 
 
 func _test_http_parsing() -> void:

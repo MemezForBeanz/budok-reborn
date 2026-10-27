@@ -136,6 +136,7 @@ func _ai_tab() -> Control:
 			_field(box, prefix + "allow_simulation", "May simulate", "bool")
 			_field(box, prefix + "max_simulations", "Simulations per turn", "int", [0, 20])
 			_field(box, prefix + "memory_turns", "Remembered turns", "int", [0, 50])
+			_field(box, prefix + "reflect_after_match", "Save lessons after each match", "bool")
 			_field(box, prefix + "style", "Play style (free text)", "string")
 			_field(box, prefix + "risk", "Risk", "option", ["cautious", "balanced", "reckless"])
 		else:
@@ -169,7 +170,7 @@ func _characters_tab() -> Control:
 	_char_status = Label.new()
 	_char_status.autowrap = true
 	box.add_child(_char_status)
-	box.add_child(_buttons([["Generate notes with AI", "_on_generate"], ["Export", "_on_export"], ["Refresh", "_on_refresh_characters"]]))
+	box.add_child(_buttons([["Generate notes with AI", "_on_generate"], ["Export", "_on_export"], ["Refresh", "_on_refresh_characters"], ["Clear memories", "_on_clear_memories"]]))
 	_field(box, "schemas.registry_enabled", "Community registry (opt-in)", "bool")
 	_field(box, "schemas.registry_url", "Registry URL (https)", "string")
 	box.add_child(_buttons([["Fetch from registry", "_on_fetch_registry"], ["Save", "_on_save"]]))
@@ -183,6 +184,8 @@ func _advanced_tab() -> Control:
 	_field(box, "source_access.enabled", "Bots may read game/mod scripts", "bool")
 	_field(box, "source_access.max_file_bytes", "Max file size to read", "int", [1000, 5000000])
 	_field(box, "logging.match_logs", "Write match logs", "bool")
+	_field(box, "memory.enabled", "Bots keep memories between matches", "bool")
+	_field(box, "memory.shown_per_match", "Memories shown at match start", "int", [0, 30])
 	_field(box, "automation.script", "Automation script (GDScript path)", "string")
 	_field(box, "ui.show_button", "Show the corner budok button", "bool")
 	_field(box, "ui.toggle_key", "Overlay toggle key", "string")
@@ -300,6 +303,14 @@ func _on_fetch_registry():
 	_on_character_selected(_char_picker.selected)
 
 
+func _on_clear_memories() -> void:
+	var entry = _selected_entry()
+	if entry == null:
+		return
+	_say("Deleted %d memories about %s." % [runtime.memory.clear_for(entry["display_name"]), entry["display_name"]])
+	_on_character_selected(_char_picker.selected)
+
+
 func _on_refresh_characters() -> void:
 	runtime.introspector.clear_cache()
 	runtime.schemas.invalidate()
@@ -333,10 +344,10 @@ func _on_character_selected(_index: int) -> void:
 	if not info["skeleton"].get("ok", false):
 		_char_status.text = "Cannot read %s: %s" % [entry["display_name"], info["skeleton"].get("error", "")]
 		return
-	_char_status.text = "%s (%s)\nNotes: %s%s, %d/%d moves annotated%s\n%s" % [
+	_char_status.text = "%s (%s)\nNotes: %s%s, %d/%d moves annotated%s\nMemories: %d\n%s" % [
 		entry["display_name"], entry["source"], info["status"], " (STALE: character changed)" if info["stale"] else "",
 		info["coverage"]["annotated"], info["coverage"]["total"], ", has summary" if info["coverage"]["has_summary"] else "",
-		info["schema_path"]]
+		runtime.memory.count_for(entry["display_name"]), info["schema_path"]]
 
 
 func _selected_entry():

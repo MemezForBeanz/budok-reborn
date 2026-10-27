@@ -64,9 +64,12 @@ func _define() -> void:
 		{"slot": slot, "timeout_s": {"type": "number", "minimum": 1, "maximum": 50, "description": "Default 20."},
 		"detail": detail}, [])
 	_add("get_turn", "Get turn", "The currently open turn for your slot, without waiting.", {"slot": slot, "detail": detail}, [], true)
-	_add("simulate", "Simulate", "Preview a move on the real engine from the current turn: your action vs an assumed opponent action (default: they hold). Returns damage, end states, frame advantage and events. Never reveals the opponent's real choice.",
+	_add("simulate", "Simulate", "Preview a move on the real engine from the current turn: your action vs an assumed opponent action (default: they hold). "
+		+ "Returns damage, end states, frame advantage, events, objects, where your hitboxes were if they missed, and any later decision you get inside the preview "
+		+ "(you_act_again_at). Never reveals the opponent's real choice.",
 		{"slot": slot, "action": {"type": "string"}, "data": data, "extra": extra,
-		"opponent_action": {"type": "string", "description": "Assumed opponent move (must be legal for them this turn)."},
+		"then": {"type": "array", "items": {"type": "object"}, "description": "Your follow-up moves [{action, data?, extra?}], played in order each time you can act again inside the preview (two-step moves, or a free turn while the opponent is busy)."},
+		"opponent_action": {"type": "string", "description": "Assumed opponent move (must be legal for them this turn, even if they already locked in)."},
 		"opponent_data": data, "opponent_extra": extra,
 		"ticks": {"type": "integer", "minimum": 10, "maximum": 300, "description": "Max ticks to simulate (default from settings)."}},
 		["action"], true)
@@ -98,6 +101,17 @@ func _define() -> void:
 	_add("search_source", "Search source", "Case-insensitive text search across game and mod scripts (res:// only).",
 		{"query": {"type": "string"}, "path_prefix": {"type": "string", "description": "Default res://"}, "max_results": {"type": "integer", "minimum": 1, "maximum": 200}}, ["query"], true)
 	_add("list_source_files", "List files", "List a res:// directory.", {"path": {"type": "string"}}, ["path"], true)
+	var who = {"type": "string", "description": "Character name, or p1 / p2 for a character in the current match."}
+	_add("remember", "Remember", "Save a lesson for future matches: how a character plays, what works in a matchup, or anything general. "
+		+ "Memories stay in this game install, are shared by every bot that plays here (each records who wrote it) and come back in later matches "
+		+ "(start_match, first turn, describe_character). Give character for notes about one character, character + opponent for a matchup "
+		+ "(playing character against opponent), neither for general notes. For lasting changes to a move's notes, use submit_character_schema instead.",
+		{"text": {"type": "string", "description": "Up to 600 characters. One concrete lesson per memory."}, "character": who, "opponent": who,
+		"tags": {"type": "array", "items": {"type": "string"}}}, ["text"])
+	_add("recall", "Recall", "Memories bots saved earlier, newest first. Defaults to the characters in the current match (their own notes, the matchups between them and general notes).",
+		{"character": who, "opponent": who, "query": {"type": "string", "description": "Only memories containing this text."},
+		"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "only_mine": {"type": "boolean", "description": "Only memories written by this client."}}, [], true)
+	_add("forget", "Forget", "Delete one memory by its id (from recall).", {"id": {"type": "string"}}, ["id"])
 	_add("get_settings", "Get settings", "Current budok settings (secrets redacted).", {}, [], true)
 	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.* or ai.annotate.* (no keys or URLs).",
 		{"path": {"type": "string"}, "value": {}}, ["path", "value"])
@@ -165,6 +179,7 @@ func _t_start_match(args: Dictionary, sid: String):
 		result["your_slots"] = runtime.matches.slots_of(sid)
 		result["next"] = "call wait_for_turn"
 		_add_notes_hint(result)
+		_add_memories(result)
 	return result
 
 
@@ -178,6 +193,62 @@ func _add_notes_hint(result: Dictionary) -> void:
 	result["notes_hint"] = ("%s %s no move notes yet, so you only get measured frame data for %s. For better play, write them first: run the annotate_character prompt "
 		+ "(introspect_character, read_source, submit_character_schema), or call generate_character_schema to let the in-game AI do it. Otherwise simulate more.") % [
 		PoolStringArray(missing).join(" and "), "has" if missing.size() == 1 else "have", "it" if missing.size() == 1 else "them"]
+
+
+func _add_memories(result: Dictionary) -> void:
+	var memories = runtime.match_memories()
+	if not memories.empty():
+		result["memories"] = runtime.memory.lines(memories)
+		result["memories_hint"] = "Lessons bots saved in earlier matches (recall shows more; remember adds yours)."
+
+
+func _t_remember(args: Dictionary, sid: String) -> Dictionary:
+	if not bool(runtime.config.get_value("memory.enabled", true)):
+		return {"ok": false, "error": "memories are turned off in settings (memory.enabled)"}
+	var context = {}
+	var characters = runtime.matches.status().get("characters", {})
+	if runtime.matches.game != null and not characters.empty():
+		context = {"match": "%s vs %s" % [characters.get("p1", ""), characters.get("p2", "")], "tick": runtime.matches.status().get("tick", 0)}
+	return runtime.memory.remember(_memory_name(args.get("character", "")), _memory_name(args.get("opponent", "")),
+		str(args.get("text", "")), args.get("tags", []), _client_name(sid), context)
+
+
+func _t_recall(args: Dictionary, sid: String) -> Dictionary:
+	var names = []
+	for key in ["character", "opponent"]:
+		var name = _memory_name(args.get(key, ""))
+		if name != "" and not (name in names):
+			names.append(name)
+	if names.empty():
+		for slot in ["p1", "p2"]:
+			var name = _memory_name(slot)
+			if name != "" and not (name in names):
+				names.append(name)
+	var entries = runtime.memory.recall(names, str(args.get("query", "")), Util.as_int(args.get("limit", 20), 20),
+		_client_name(sid) if bool(args.get("only_mine", false)) else "")
+	return {"ok": true, "characters": names, "memories": entries}
+
+
+func _t_forget(args: Dictionary, _sid: String) -> Dictionary:
+	return runtime.memory.forget(str(args.get("id", "")))
+
+
+# "p1"/"p2" mean the character in that slot; other names resolve through the
+# roster, and unknown ones are kept as written (the character may not be installed).
+func _memory_name(value) -> String:
+	var text = str(value if value != null else "").strip_edges()
+	if text in ["p1", "p2"]:
+		var entry = runtime.matches.match_info.get("characters", {}).get(text)
+		return entry["display_name"] if entry is Dictionary else ""
+	if text == "":
+		return ""
+	var entry = runtime.roster.resolve(text)
+	return entry["display_name"] if entry is Dictionary else text
+
+
+func _client_name(sid: String) -> String:
+	var name = str(runtime.mcp.sessions.get(sid, {}).get("client", {}).get("name", ""))
+	return "mcp:" + (name if name != "" else "unknown")
 
 
 func _characters_without_notes() -> Array:
@@ -221,6 +292,7 @@ func _t_wait_for_turn(args: Dictionary, sid: String):
 	view["status"] = "your_turn"
 	if not runtime.matches.has_decided(slot["slot"]):
 		_add_notes_hint(view)
+		_add_memories(view)
 	return view
 
 
@@ -247,7 +319,7 @@ func _t_simulate(args: Dictionary, sid: String):
 	if str(args.get("opponent_action", "")) != "":
 		theirs = {"action": args["opponent_action"], "data": args.get("opponent_data"), "extra": args.get("opponent_extra", {})}
 	var result = yield(runtime.matches.simulate(slot["slot"],
-		{"action": str(args.get("action", "")), "data": args.get("data"), "extra": args.get("extra", {})},
+		{"action": str(args.get("action", "")), "data": args.get("data"), "extra": args.get("extra", {}), "then": args.get("then", [])},
 		theirs, Util.as_int(args.get("ticks", 0))), "completed")
 	return result
 

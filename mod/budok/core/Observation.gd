@@ -118,22 +118,45 @@ static func fighter(f, slot: String, info: Dictionary, detail: String) -> Dictio
 	if stance != "Normal":
 		obs["stance"] = stance
 	var resources = _resources(f, info, detail)
-	if not resources.empty():
-		obs["resources"] = resources
+	if not resources["values"].empty():
+		obs["resources"] = resources["values"]
+	if detail == "full" and resources["unchanged"] > 0:
+		obs["resources_at_start_value"] = resources["unchanged"]
 	return obs
 
 
+# Character-specific variables. Ones still at their starting value (cooldowns at
+# 0, unused flags) are left out unless the schema labels them; the full detail
+# level reports how many were left out.
 static func _resources(f, info: Dictionary, detail: String) -> Dictionary:
 	var raw = Introspector.custom_properties(f)
 	var notes = info.get("schema", {}).get("resources", {})
+	var defaults = info.get("skeleton", {}).get("resources", {})
 	var out = {}
+	var unchanged = 0
 	for key in raw:
 		var meta = notes.get(key, {}) if notes is Dictionary else {}
 		if bool(meta.get("hidden", false)) and detail != "full":
 			continue
+		var changed = not (defaults is Dictionary and defaults.has(key)) or Util.json_str(raw[key]) != Util.json_str(defaults[key])
+		if not changed and meta.empty():
+			unchanged += 1
+			continue
 		if detail == "full" or not meta.empty() or notes.empty():
 			out[meta.get("label", key)] = raw[key]
-	return out
+	return {"values": out, "unchanged": unchanged}
+
+
+# A readable type for an object: its scene or script file ("Shuriken"), since
+# spawned objects are named by number.
+static func object_type(obj) -> String:
+	var file = str(Util.prop(obj, "filename", ""))
+	if file != "":
+		return file.get_file().get_basename()
+	var chain = Util.script_chain(obj)
+	if not chain.empty():
+		return chain[0].get_file().get_basename()
+	return Util.strip_trailing_digits(str(obj.name))
 
 
 # Gap between the fighter's body (collision box) and each wall. Walls stand at
@@ -164,7 +187,7 @@ static func objects(game, me, motion: Dictionary = {}) -> Array:
 			owner = "mine" if creator == me else "opponent"
 		var state = Util.call_or(obj, "current_state")
 		var entry = {
-			"type": Util.strip_trailing_digits(str(obj.name)),
+			"type": object_type(obj),
 			"kind": "projectile" if PROJECTILE_BASE in Util.script_chain(obj) else "object",
 			"owner": owner,
 			"position": Util.xy(Util.call_or(obj, "get_pos", [], Vector2.ZERO)),
@@ -210,6 +233,8 @@ static func situation(obs: Dictionary) -> String:
 		for side in walls:
 			if walls[side] <= CORNER_DISTANCE:
 				lines.append("%s %s the %s wall (%d away)." % [who[0], "against" if walls[side] <= 5 else "near", side, walls[side]])
+	if (obs["spacing"]["opponent_is"] == "right" and me["facing"] == "left") or (obs["spacing"]["opponent_is"] == "left" and me["facing"] == "right"):
+		lines.append("You are facing %s, away from the opponent; aim pads and reverse still count from the opponent's side." % me["facing"])
 	if me["hitlag"] > 0:
 		lines.append("You are in hitlag for %d more ticks: a move you pick now starts after that." % me["hitlag"])
 	if opp["busy"]:

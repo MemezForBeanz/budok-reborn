@@ -11,6 +11,7 @@ const Util = preload("res://budok/core/Util.gd")
 const Observation = preload("res://budok/core/Observation.gd")
 const GAME_SCENE := "res://Game.tscn"
 const MAX_EVENTS := 40
+const DETECT_TYPE := 6
 const NEUTRAL_EXTRA := {"DI": {"x": 0, "y": 0}, "reverse": false, "feint": false, "prediction": -1}
 
 var _busy := false
@@ -69,12 +70,14 @@ func run(game, actions: Dictionary, choosing: Array, max_ticks: int, viewer_slot
 		# on_action_selected clears the interruptable flags the same way a
 		# real lock-in does; usability was validated by the caller.
 		fighter.on_action_selected(queued["action"], queued.get("data"), queued.get("extra", NEUTRAL_EXTRA.duplicate(true)))
-	var result = _step(sim, max_ticks, viewer_slot)
+	var mine = actions.get(viewer_slot)
+	var followups = mine.get("then", []).duplicate() if mine is Dictionary else []
+	var result = _step(sim, max_ticks, viewer_slot, followups)
 	_finish(sim)
 	return result
 
 
-func _step(sim, max_ticks: int, viewer: String) -> Dictionary:
+func _step(sim, max_ticks: int, viewer: String, followups: Array) -> Dictionary:
 	var me_id = 1 if viewer == "p1" else 2
 	var fighters = {"me": sim.get_player(me_id), "opponent": sim.get_player(3 - me_id)}
 	var start = {}
@@ -91,6 +94,10 @@ func _step(sim, max_ticks: int, viewer: String) -> Dictionary:
 	# spawn events and measured speed.
 	var positions = _object_positions(sim)
 	var motion = {}
+	# Your later decision points inside the preview (two-step moves, or a free
+	# turn while the opponent is still busy).
+	var acted_again = []
+	var reach = {"active_ticks": 0, "first_active": -1, "gap_x": 999999, "gap_y": 999999, "overlapped": false}
 	while ticks < max_ticks:
 		sim.simulate_one_tick()
 		ticks += 1
@@ -101,7 +108,7 @@ func _step(sim, max_ticks: int, viewer: String) -> Dictionary:
 				motion[id] = {"x": now[id]["x"] - positions[id]["x"], "y": now[id]["y"] - positions[id]["y"]}
 			elif events.size() < MAX_EVENTS:
 				var obj = instance_from_id(id)
-				events.append({"tick": ticks, "event": "spawn", "object": Util.strip_trailing_digits(str(obj.name)),
+				events.append({"tick": ticks, "event": "spawn", "object": Observation.object_type(obj),
 					"owner": _owner_of(obj, fighters["me"]), "position": now[id]})
 		positions = now
 		for who in fighters:
@@ -118,8 +125,22 @@ func _step(sim, max_ticks: int, viewer: String) -> Dictionary:
 				bool(Util.prop(f, "state_interruptable", false)) or bool(Util.prop(f, "state_hit_cancellable", false))
 			):
 				ready_at[who] = ticks
+		_track_reach(fighters["me"], fighters["opponent"], ticks, reach)
 		if turn_end == -1 and (ready_at["me"] != -1 or ready_at["opponent"] != -1):
 			turn_end = ticks
+		if ready_at["me"] == ticks:
+			if followups.empty() and ready_at["opponent"] == -1:
+				acted_again.append(ticks)
+			if not followups.empty():
+				var step = followups.pop_front()
+				var state = Util.prop(Util.prop(fighters["me"], "state_machine", null), "states_map", {}).get(step["action"])
+				if state != null and state.has_method("is_usable") and not state.is_usable():
+					events.append({"tick": ticks, "event": "followup_not_usable", "action": step["action"]})
+					followups.clear()
+				else:
+					fighters["me"].on_action_selected(step["action"], step.get("data"), step.get("extra"))
+					events.append({"tick": ticks, "event": "followup", "action": step["action"]})
+					ready_at["me"] = -1
 		if bool(Util.prop(sim, "game_finished", false)):
 			events.append({"tick": ticks, "event": "game_over"})
 			break
@@ -151,8 +172,40 @@ func _step(sim, max_ticks: int, viewer: String) -> Dictionary:
 		result["in_hitlag"] = hitlag
 	if ready_at["me"] != -1 and ready_at["opponent"] != -1:
 		result["frame_advantage"] = ready_at["opponent"] - ready_at["me"]
+	if not acted_again.empty():
+		result["you_act_again_at"] = acted_again
+	if reach["active_ticks"] > 0:
+		result["your_hitboxes"] = {"active_ticks": reach["active_ticks"], "first_active": reach["first_active"],
+			"overlapped_opponent": reach["overlapped"], "closest_gap": {"x": reach["gap_x"], "y": reach["gap_y"]}}
 	result["summary"] = _summary(result)
 	return result
+
+
+# Where your active hitboxes were relative to the opponent's body, so a miss can
+# be explained (out of reach, too high, or touching but not hitting).
+static func _track_reach(me, opponent, tick: int, reach: Dictionary) -> void:
+	var state = Util.call_or(me, "current_state")
+	var hurtbox = Util.prop(opponent, "hurtbox", null)
+	if not Util.valid(state) or not state.has_method("get_active_hitboxes") or not Util.valid(hurtbox) or not hurtbox.has_method("get_aabb"):
+		return
+	var body = hurtbox.get_aabb()
+	var any = false
+	for hitbox in state.get_active_hitboxes():
+		if not hitbox.has_method("get_aabb") or Util.as_int(Util.prop(hitbox, "hitbox_type", 0)) == DETECT_TYPE:
+			continue
+		any = true
+		var box = hitbox.get_aabb()
+		var gap_x = int(max(0, max(box["x1"] - body["x2"], body["x1"] - box["x2"])))
+		var gap_y = int(max(0, max(box["y1"] - body["y2"], body["y1"] - box["y2"])))
+		if gap_x == 0 and gap_y == 0:
+			reach["overlapped"] = true
+		if gap_x + gap_y < reach["gap_x"] + reach["gap_y"]:
+			reach["gap_x"] = gap_x
+			reach["gap_y"] = gap_y
+	if any:
+		reach["active_ticks"] += 1
+		if reach["first_active"] == -1:
+			reach["first_active"] = tick
 
 
 func _snapshot(f) -> Dictionary:
@@ -191,6 +244,15 @@ func _summary(r: Dictionary) -> String:
 		text += "The opponent starts in hitlag (%d ticks). " % hitlag["opponent"]
 	text += "After %d ticks: you dealt %d and took %d damage. You end in %s, opponent in %s." % [
 		r["ticks_simulated"], r["damage_dealt"], r["damage_taken"], r["me"]["state"], r["opponent"]["state"]]
+	if r.has("you_act_again_at"):
+		text += " You get another decision at tick %d while the opponent is still busy (a follow-up or a free turn); after that this preview assumes you Continue. Pass then: [{action, data}] to preview a follow-up." % r["you_act_again_at"][0]
+	var hitboxes = r.get("your_hitboxes", {})
+	if not hitboxes.empty() and r["damage_dealt"] == 0:
+		if hitboxes["overlapped_opponent"]:
+			text += " Your hitboxes touched the opponent but did not damage them (blocked, parried, invulnerable or armored)."
+		else:
+			text += " Your hitboxes were active for %d ticks but missed by %d horizontally and %d vertically." % [
+				hitboxes["active_ticks"], hitboxes["closest_gap"]["x"], hitboxes["closest_gap"]["y"]]
 	if r.has("frame_advantage"):
 		var adv = r["frame_advantage"]
 		text += " Frame advantage: %s%d (%s)." % ["+" if adv >= 0 else "", adv, "you act first" if adv > 0 else ("even" if adv == 0 else "opponent acts first")]

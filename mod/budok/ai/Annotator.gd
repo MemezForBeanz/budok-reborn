@@ -168,6 +168,9 @@ func _batch_prompt(entry: Dictionary, skeleton: Dictionary, batch: Array, cfg: D
 	]
 	if not sources.empty():
 		parts.append("Scripts of code-driven moves:\n" + PoolStringArray(sources).join("\n\n"))
+	var learned = _learned(entry)
+	if learned != "":
+		parts.append(learned)
 	parts.append("Write notes for exactly these moves and save them with submit_character_schema {\"schema\": {\"moves\": {...}}}. Use read_source if something is unclear. Keep each text short and concrete.")
 	return PoolStringArray(parts).join("\n\n")
 
@@ -180,8 +183,20 @@ func _summary_prompt(entry: Dictionary, skeleton: Dictionary) -> String:
 		"Stats: " + Util.json_str(skeleton.get("stats", {})),
 		"Resources: " + Util.json_str(skeleton.get("resources", {})),
 		"Fighter script: %s (read it for passives and resource rules)." % skeleton.get("script_path", ""),
+		_learned(entry),
 		"Now submit the summary (archetype, game_plan, strengths, weaknesses, tips) and a meaning/label for each gameplay-relevant resource (hide internal bookkeeping ones with hidden=true), via submit_character_schema.",
 	]).join("\n\n")
+
+
+# What bots wrote down about this character in real matches (their memories):
+# evidence to check against the code, not facts to copy.
+func _learned(entry: Dictionary) -> String:
+	if not bool(runtime.config.get_value("memory.enabled", true)):
+		return ""
+	var entries = runtime.memory.recall([entry["display_name"]], "", 15)
+	if entries.empty():
+		return ""
+	return "What players' bots noted about this character in matches (verify against the code before using):\n- " + PoolStringArray(runtime.memory.lines(entries)).join("\n- ")
 
 
 static func _all_ok(results: Array) -> bool:

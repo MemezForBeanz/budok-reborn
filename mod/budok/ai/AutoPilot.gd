@@ -8,6 +8,18 @@ extends Node
 
 const Util = preload("res://budok/core/Util.gd")
 const Prompts = preload("res://budok/ai/Prompts.gd")
+const REMEMBER_HELP := ("Save one lesson for future matches (kept in this game install and shown to every bot later). "
+	+ "about: opponent (their character), matchup (your character against theirs), self (your character) or general.")
+const SIMULATE_HELP := ("Preview one of your legal moves on the real engine against an assumed opponent move (omit opponent_action to assume they hold). "
+	+ "Returns damage, end states, frame advantage and why an attack missed. then: your follow-ups for later decisions inside the preview.")
+const REMEMBER_TOOL := {
+	"name": "remember",
+	"description": REMEMBER_HELP,
+	"parameters": {"type": "object", "properties": {
+		"about": {"type": "string", "enum": ["opponent", "matchup", "self", "general"]},
+		"text": {"type": "string", "description": "One concrete lesson, under 600 characters."}},
+		"required": ["about", "text"]},
+}
 
 var runtime = null
 var llm = null
@@ -22,6 +34,7 @@ func setup(runtime_ref, llm_ref) -> void:
 	llm = llm_ref
 	runtime.matches.connect("turn_opened", self, "_on_turn_opened")
 	runtime.matches.connect("match_started", self, "_on_match_started")
+	runtime.matches.connect("match_ended", self, "_on_match_ended")
 
 
 func _on_match_started(_info) -> void:
@@ -41,11 +54,12 @@ func _tools() -> Array:
 	if bool(runtime.config.get_value("ai.play.allow_simulation", true)) and bool(runtime.config.get_value("simulation.enabled", true)):
 		tools.append({
 			"name": "simulate",
-			"description": "Preview one of your legal moves on the real engine against an assumed opponent move (omit opponent_action to assume they hold). Returns damage, end states and frame advantage.",
+			"description": SIMULATE_HELP,
 			"parameters": {"type": "object", "properties": {
-				"action": {"type": "string"}, "data": {}, "extra": {"type": "object"},
+				"action": {"type": "string"}, "data": {}, "extra": {"type": "object"}, "then": {"type": "array", "items": {"type": "object"}},
 				"opponent_action": {"type": "string"}, "opponent_data": {}}, "required": ["action"]},
 		})
+	tools.append(REMEMBER_TOOL)
 	tools.append({
 		"name": "describe_moves",
 		"description": "Notes and measured data for specific moves of you or the opponent.",
@@ -105,10 +119,12 @@ func _take_turn(slot: String, token: String) -> void:
 						var theirs = null
 						if str(input.get("opponent_action", "")) != "":
 							theirs = {"action": input["opponent_action"], "data": input.get("opponent_data")}
-						output = yield(runtime.matches.simulate(slot, {"action": str(input.get("action", "")), "data": input.get("data"),
+						output = yield(runtime.matches.simulate(slot, {"action": str(input.get("action", "")), "data": input.get("data"), "then": input.get("then", []),
 							"extra": input.get("extra", {})}, theirs, 0), "completed")
 				"describe_moves":
 					output = _describe(slot, str(input.get("who", "me")), input.get("moves", []))
+				"remember":
+					output = _save_memory(slot, input)
 				"submit_action":
 					output = runtime.matches.submit(token, str(input.get("action", "")), input.get("data"), input.get("extra", {}),
 						"ai:%s" % str(cfg.get("model", "")))
@@ -130,6 +146,68 @@ func _take_turn(slot: String, token: String) -> void:
 	stats["turns"] += 1
 	if _busy[slot] == token:
 		_busy[slot] = ""
+
+
+# After a match the model gets one short chance to write down what it learned.
+func _on_match_ended(result) -> void:
+	if not bool(runtime.config.get_value("ai.play.reflect_after_match", true)) or not bool(runtime.config.get_value("memory.enabled", true)):
+		return
+	for slot in ["p1", "p2"]:
+		if runtime.matches.controllers.get(slot) == "ai":
+			_reflect(slot, result, _notes[slot].duplicate())
+
+
+func _reflect(slot: String, result: Dictionary, notes: Array) -> void:
+	yield(get_tree(), "idle_frame")
+	var characters = result.get("characters", {})
+	var other = "p2" if slot == "p1" else "p1"
+	var log_data = runtime.matches.match_log(16)
+	var prompt = PoolStringArray([
+		"The match is over. You played %s (%s) against %s. Result: %s." % [characters.get(slot, "?"), slot, characters.get(other, "?"), Util.json_str(result)],
+		"Last turns (both moves, revealed): " + Util.json_str(log_data.get("history", [])),
+		"Your notes during the match: " + (PoolStringArray(notes).join(" | ") if not notes.empty() else "(none)"),
+		"Save the 1-3 lessons most worth remembering for future matches with remember (about the opponent's character, this matchup, or your own character). Skip anything generic or already obvious. Reply with nothing else.",
+	]).join("\n")
+	var messages = [llm.user_message(prompt)]
+	var saved = 0
+	for _step in range(2):
+		var reply = yield(llm.chat("play", "You review YOMI Hustle matches you just played and keep short, concrete notes.", messages, [REMEMBER_TOOL]), "completed")
+		if not reply.get("ok", false):
+			stats["last_error"] = "reflection: %s" % str(reply.get("error", ""))
+			return
+		_count_usage(reply.get("usage", {}))
+		if reply["tool_calls"].empty():
+			return
+		messages.append(reply["assistant"])
+		var results = []
+		for tool_call in reply["tool_calls"]:
+			var output = _save_memory(slot, tool_call["input"] if tool_call["input"] is Dictionary else {}) if saved < 3 else {"ok": false, "error": "three lessons are enough"}
+			if output.get("ok", false):
+				saved += 1
+			results.append({"id": tool_call["id"], "content": Util.json_str(output), "is_error": not output.get("ok", false)})
+		messages += llm.tool_results("play", results)
+		if saved >= 3:
+			return
+
+
+func _save_memory(slot: String, input: Dictionary) -> Dictionary:
+	var names = {}
+	for s in ["p1", "p2"]:
+		var entry = runtime.matches.match_info.get("characters", {}).get(s, {})
+		names[s] = entry.get("display_name", "") if entry is Dictionary else ""
+	var mine = names[slot]
+	var theirs = names["p2" if slot == "p1" else "p1"]
+	var character = ""
+	var opponent = ""
+	match str(input.get("about", "general")):
+		"opponent":
+			character = theirs
+		"self":
+			character = mine
+		"matchup":
+			character = mine
+			opponent = theirs
+	return runtime.memory.remember(character, opponent, str(input.get("text", "")), [], "ai:%s" % str(runtime.config.get_value("ai.play.model", "")))
 
 
 func _turn_prompt(slot: String, view: Dictionary, max_sims: int) -> String:

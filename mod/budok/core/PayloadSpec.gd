@@ -6,7 +6,9 @@ extends Reference
 # spec whose default is the UI's current value, so modded characters always
 # work even when we cannot interpret their controls.
 #
-# Spec kinds: none, xy, direction8, int_field, bool, option, object, opaque.
+# Spec kinds: none, xy, direction8, int_field, bool, option, choice (custom
+# button groups such as the parry's Block Height), fixed (no input this turn),
+# object, opaque. A spec may carry "path": the control inside a wrapper node.
 
 const Util = preload("res://budok/core/Util.gd")
 const DIRECTIONS := ["NW", "N", "NE", "W", "Neutral", "E", "SW", "S", "SE"]
@@ -31,6 +33,8 @@ const TYPE_HELP := {
 	"int": "a whole number between min and max.",
 	"bool": "true or false.",
 	"option": "one of the choices, by name.",
+	"choice": "one of the choices, by name (for example \"Low\").",
+	"fixed": "nothing to choose this turn: the move uses the value shown, so omit data.",
 	"object": "an object with one value per field, each filled by its own type.",
 	"opaque": "a value shaped like the default (a custom control budok cannot interpret); omit data to use the default.",
 }
@@ -44,6 +48,9 @@ static func describe_data_node(data_node) -> Dictionary:
 	var spec = {}
 	if children.size() == 1:
 		spec = describe_control(children[0])
+		# Point at the control itself, so coerce sets (and clamps) it like the UI.
+		if not (spec["kind"] in ["none", "opaque"]):
+			spec["path"] = str(children[0].name) + ("/" + spec["path"] if spec.has("path") else "")
 	elif children.size() > 1:
 		var fields = {}
 		for child in children:
@@ -56,8 +63,18 @@ static func describe_data_node(data_node) -> Dictionary:
 	if sample == null and spec["kind"] == "none":
 		return spec
 	if not _same_shape(sample, _default_of(spec)):
-		return _opaque(sample, "custom data UI")
+		# SuperJump outside a combo hides its aim and always sends "homing".
+		if _controls_hidden(children):
+			return {"kind": "fixed", "default": Util.json_safe(sample)}
+		return _opaque(sample, "custom data UI", data_node)
 	return spec
+
+
+static func _controls_hidden(children: Array) -> bool:
+	for child in children:
+		if child.has_method("get_data") and (not (child is CanvasItem) or child.visible):
+			return false
+	return true
 
 
 static func describe_control(control) -> Dictionary:
@@ -95,7 +112,90 @@ static func describe_control(control) -> Dictionary:
 			"max": Util.as_int(control.max_value),
 			"default": Util.json_safe(sample),
 		}
-	return _opaque(sample, "unrecognised control %s" % control.name)
+	var choice = _describe_choice(control, sample)
+	if not choice.empty():
+		return choice
+	# A wrapper around one known control that passes its value through.
+	var inner = _wrapped_control(control, sample)
+	if inner != null:
+		var inner_spec = describe_control(inner)
+		if not (inner_spec["kind"] in ["opaque", "none"]):
+			inner_spec["path"] = str(control.get_path_to(inner))
+			return inner_spec
+	return _opaque(sample, "unrecognised control %s" % control.name, control)
+
+
+# Controls built from buttons (the parry's Block Height: High / Low). Each
+# button is pressed in turn without signals to learn the value it gives, then
+# the original state is put back, so the panel never notices.
+static func _describe_choice(control, sample) -> Dictionary:
+	var buttons = []
+	_collect_buttons(control, buttons, 0)
+	if buttons.size() < 2:
+		return {}
+	var saved = []
+	for button in buttons:
+		saved.append(button.pressed)
+	var labels = []
+	var values = []
+	var seen = {}
+	var toggles = true
+	for button in buttons:
+		for other in buttons:
+			other.set_pressed_no_signal(other == button)
+		var value = Util.json_safe(control.get_data())
+		values.append(value)
+		seen[Util.json_str(value)] = true
+		labels.append(_button_label(button))
+		toggles = toggles and button.toggle_mode
+	for i in range(buttons.size()):
+		buttons[i].set_pressed_no_signal(saved[i])
+	var distinct = seen.size() == buttons.size()
+	if not distinct and not toggles:
+		return {}
+	var paths = []
+	var default_choice = ""
+	for i in range(buttons.size()):
+		paths.append(str(control.get_path_to(buttons[i])))
+		if distinct and Util.json_str(values[i]) == Util.json_str(Util.json_safe(sample)):
+			default_choice = labels[i]
+	return {"kind": "choice", "choices": labels, "values": values if distinct else [], "paths": paths,
+		"default": Util.json_safe(sample), "default_choice": default_choice}
+
+
+static func _collect_buttons(node: Node, out: Array, depth: int) -> void:
+	for child in node.get_children():
+		if child is BaseButton and not (child is OptionButton):
+			out.append(child)
+		elif depth < 3:
+			_collect_buttons(child, out, depth + 1)
+
+
+static func _button_label(button) -> String:
+	var text = str(button.text).strip_edges() if button is Button else ""
+	return text if text != "" else str(button.name)
+
+
+static func _wrapped_control(control, sample):
+	var found = null
+	for child in control.get_children():
+		if child.has_method("get_data"):
+			if found != null:
+				return null
+			found = child
+	if found != null and Util.json_str(Util.json_safe(found.get_data())) == Util.json_str(Util.json_safe(sample)):
+		return found
+	return null
+
+
+# A click on a button, as the panel would get it.
+static func _press(button) -> void:
+	if button.toggle_mode:
+		if not button.pressed:
+			button.pressed = true
+			button.emit_signal("pressed")
+	else:
+		button.emit_signal("pressed")
 
 
 # Public, compact form shown to bots.
@@ -106,8 +206,8 @@ static func public_spec(spec: Dictionary):
 		"xy":
 			var out = {"type": "xy", "default": spec["default"]}
 			if bool(spec.get("limit_angle", false)):
-				out["note"] = "aim limited to +/- %s deg around your forward side (the side you face after reverse); values outside are clamped" % [
-					spec.get("limit_range_degrees", 0)]
+				out["note"] = "aim limited to +/- %s deg around its center on your forward side (the side you face after reverse); values outside are clamped" % [
+					str(float(spec.get("limit_range_degrees", 0)) / 2.0)]
 			return out
 		"direction8":
 			return {"type": "direction8", "allowed": spec["allowed"], "default": spec["default"]}
@@ -119,13 +219,21 @@ static func public_spec(spec: Dictionary):
 		"option":
 			return {"type": "option", "choices": spec["choices"], "disabled": spec["disabled"],
 				"default": spec["default"].get("name")}
+		"choice":
+			return {"type": "choice", "choices": spec["choices"],
+				"default": spec["default_choice"] if spec["default_choice"] != "" else spec["default"]}
+		"fixed":
+			return {"type": "fixed", "value": spec["default"]}
 		"object":
 			var fields = {}
 			for field_name in spec["fields"]:
 				fields[field_name] = public_spec(spec["fields"][field_name])
 			return {"type": "object", "fields": fields}
 		"opaque":
-			return {"type": "opaque", "default": spec.get("default"), "note": spec.get("note", "")}
+			var out_opaque = {"type": "opaque", "default": spec.get("default"), "note": spec.get("note", "")}
+			if spec.has("script"):
+				out_opaque["script"] = spec["script"]
+			return out_opaque
 	return null
 
 
@@ -145,16 +253,22 @@ static func _collect_help(payload, help: Dictionary) -> void:
 		_collect_help(field, help)
 
 
-# Returns {"ok": true, "value": v} or {"ok": false, "error": msg}. `control` is
-# the live UI node for this spec (used to clamp values exactly like the game).
+# Returns {"ok": true, "value": v, "note"?: text} or {"ok": false, "error": msg}.
+# `control` is the live UI node for this spec (used to clamp values exactly like
+# the game); "note" says when the game's control changed the value.
 static func coerce(spec: Dictionary, value, control = null) -> Dictionary:
 	var kind = spec.get("kind", "none")
 	if kind == "none":
 		return {"ok": true, "value": null}
+	if spec.has("path") and Util.valid(control):
+		control = control.get_node_or_null(spec["path"])
 	value = _unwrap(value)
 	if value == null:
 		if kind == "object":
 			value = {}
+		elif kind in ["xy", "choice"] and Util.valid(control):
+			# The live value: aim pads mirror when the move is reversed.
+			return {"ok": true, "value": control.get_data()}
 		else:
 			return {"ok": true, "value": _default_of(spec)}
 	match kind:
@@ -163,13 +277,17 @@ static func coerce(spec: Dictionary, value, control = null) -> Dictionary:
 				value = {"x": value[0], "y": value[1]}
 			if not (value is Dictionary) or not value.has("x") or not value.has("y"):
 				return _err("expected {\"x\": int, \"y\": int} in [-100, 100], got %s" % _shown(value))
-			var x = clamp(Util.as_int(Util.numeric(value["x"])), -XY_RANGE, XY_RANGE)
-			var y = clamp(Util.as_int(Util.numeric(value["y"])), -XY_RANGE, XY_RANGE)
+			var x = int(clamp(Util.as_int(Util.numeric(value["x"])), -XY_RANGE, XY_RANGE))
+			var y = int(clamp(Util.as_int(Util.numeric(value["y"])), -XY_RANGE, XY_RANGE))
 			if Util.valid(control) and control.has_method("set_value_float") and Util.has_prop(control, "panel_radius"):
 				var radius = float(control.panel_radius)
 				control.set_value_float(Vector2(x, y) / float(XY_RANGE) * radius)
-				return {"ok": true, "value": control.get_data()}
-			return {"ok": true, "value": {"x": int(x), "y": int(y)}}
+				var applied = control.get_data()
+				var result = {"ok": true, "value": applied}
+				if abs(Util.as_int(applied.get("x", x)) - x) > 2 or abs(Util.as_int(applied.get("y", y)) - y) > 2:
+					result["note"] = "aim {x: %d, y: %d} became {x: %s, y: %s} (%s)" % [x, y, applied.get("x"), applied.get("y"), _aim_limits(control)]
+				return result
+			return {"ok": true, "value": {"x": x, "y": y}}
 		"direction8":
 			var dir_name = _direction_name(value)
 			# The live picker knows the current allowed set (it mirrors with reverse).
@@ -192,7 +310,10 @@ static func coerce(spec: Dictionary, value, control = null) -> Dictionary:
 			if not (raw is int or raw is float or (raw is String and raw.is_valid_float())):
 				return _err("expected an integer between %d and %d" % [spec["min"], spec["max"]])
 			var clamped = int(clamp(Util.as_int(Util.numeric(raw)), spec["min"], spec["max"]))
-			return {"ok": true, "value": {spec["key"]: clamped}}
+			var int_result = {"ok": true, "value": {spec["key"]: clamped}}
+			if clamped != Util.as_int(Util.numeric(raw)):
+				int_result["note"] = "%s is outside %d..%d; used %d" % [str(raw), spec["min"], spec["max"], clamped]
+			return int_result
 		"bool":
 			if value is bool:
 				return {"ok": true, "value": value}
@@ -215,19 +336,65 @@ static func coerce(spec: Dictionary, value, control = null) -> Dictionary:
 				if not spec["fields"].has(key):
 					return _err("unknown field %s; fields are %s" % [key, str(spec["fields"].keys())])
 			var out = {}
+			var notes = []
 			for field_name in spec["fields"]:
 				var child = control.get_node_or_null(field_name) if Util.valid(control) else null
 				var field_result = coerce(spec["fields"][field_name], value.get(field_name), child)
 				if not field_result["ok"]:
 					return _err("%s: %s" % [field_name, field_result["error"]])
 				out[field_name] = field_result["value"]
-			return {"ok": true, "value": out}
+				if field_result.has("note"):
+					notes.append("%s: %s" % [field_name, field_result["note"]])
+			var object_result = {"ok": true, "value": out}
+			if not notes.empty():
+				object_result["note"] = PoolStringArray(notes).join("; ")
+			return object_result
+		"choice":
+			var index = _choice_index(spec, value)
+			if index == -1:
+				return _err("expected one of %s, got %s" % [str(spec["choices"]), _shown(value)])
+			var known = index < spec["values"].size()
+			if Util.valid(control):
+				var button = control.get_node_or_null(spec["paths"][index])
+				if button != null:
+					_press(button)
+					if known and Util.json_str(Util.json_safe(control.get_data())) != Util.json_str(spec["values"][index]):
+						button.emit_signal("toggled", true)
+				return {"ok": true, "value": spec["values"][index] if known else control.get_data()}
+			if known:
+				return {"ok": true, "value": spec["values"][index]}
+			return _err("this control can only be set on your own moves; omit it to assume the default")
+		"fixed":
+			var fixed_result = {"ok": true, "value": spec["default"]}
+			if Util.json_str(value) != Util.json_str(spec["default"]):
+				fixed_result["note"] = "this move takes no input right now; used %s" % Util.json_str(spec["default"])
+			return fixed_result
 		"opaque":
 			var default_value = spec.get("default")
 			if default_value != null and typeof(_ints(value)) != typeof(default_value):
 				return _err("expected a value shaped like %s" % Util.json_str(default_value))
 			return {"ok": true, "value": _ints(value)}
 	return _err("unsupported payload kind %s" % kind)
+
+
+static func _choice_index(spec: Dictionary, value) -> int:
+	for i in range(spec["choices"].size()):
+		if value is String and value.strip_edges().to_lower() == spec["choices"][i].to_lower():
+			return i
+		if i < spec["values"].size() and Util.json_str(_ints(value)) == Util.json_str(spec["values"][i]):
+			return i
+	if (value is int or value is float) and int(value) >= 0 and int(value) < spec["choices"].size():
+		return int(value)
+	return -1
+
+
+static func _aim_limits(control) -> String:
+	var forward = "right" if Util.as_int(Util.prop(control, "facing", 1)) >= 0 else "left"
+	if bool(Util.prop(control, "limit_angle", false)):
+		return "this move aims only within %s deg of its center on your forward side, which is %s" % [str(float(Util.prop(control, "limit_range_degrees", 0)) / 2.0), forward]
+	if bool(Util.prop(control, "always_max", false)):
+		return "this move always uses the full length"
+	return "the move's aim limits; forward is %s" % forward
 
 
 static func _default_of(spec: Dictionary):
@@ -242,8 +409,13 @@ static func _default_of(spec: Dictionary):
 	return spec.get("default")
 
 
-static func _opaque(sample, note: String) -> Dictionary:
-	return {"kind": "opaque", "default": Util.json_safe(sample), "note": note}
+static func _opaque(sample, note: String, control = null) -> Dictionary:
+	var spec = {"kind": "opaque", "default": Util.json_safe(sample),
+		"note": note + "; send a value shaped like the default (read its script to see the options)"}
+	var chain = Util.script_chain(control) if control != null else []
+	if not chain.empty():
+		spec["script"] = chain[0]
+	return spec
 
 
 # JSON numbers arrive as floats; the game's UI produces ints. Convert whole

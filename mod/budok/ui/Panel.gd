@@ -76,9 +76,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-	# The Mod List already shows these settings, and the button would cover
-	# its title bar.
-	_toggle.visible = _show_button and not (runtime.mod_menu != null and runtime.mod_menu.showing())
+	_toggle.visible = _show_button
 	if not _root.visible:
 		return
 	_refresh_timer += delta

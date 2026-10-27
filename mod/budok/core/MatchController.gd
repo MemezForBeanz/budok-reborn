@@ -50,6 +50,9 @@ var _decision_point := {}
 # Recently closed turns by token, so a retried submit learns what happened.
 var _closed := {}
 var _closed_order := []
+# Turns played as Continue for a slot (forced) since its last own decision.
+var _auto_turns := {"p1": [], "p2": []}
+var _auto_at := {"p1": -1, "p2": -1}
 # Objects' movement over the last tick, by instance id (see _track_motion).
 var _motion := {}
 var _motion_positions := {}
@@ -184,6 +187,18 @@ func known_turn(token: String):
 	return turn if turn != null else _closed.get(token)
 
 
+# `slot`'s turn at the decision point `tick`, open or already answered.
+func turn_at(slot: String, tick: int):
+	var turn = turns.get(slot)
+	if turn != null and turn["tick"] == tick:
+		return turn
+	for i in range(_closed_order.size() - 1, -1, -1):
+		var closed = _closed.get(_closed_order[i])
+		if closed != null and closed["slot"] == slot and closed["tick"] == tick:
+			return closed
+	return null
+
+
 # Everything a decision-maker needs for one open turn. detail: compact (move
 # names and payload types only; notes via describe_character), summary (short
 # notes and frame data) or full (all notes, raw resources, opponent's options).
@@ -202,6 +217,13 @@ func turn_view(slot: String, detail: String = "summary") -> Dictionary:
 		"tick": turn["tick"],
 		"situation": Observation.situation(obs),
 	}
+	if not _auto_turns[slot].empty():
+		var states = []
+		for state_name in _auto_turns[slot]:
+			if not (state_name in states):
+				states.append(state_name)
+		view["auto_continued"] = {"turns": _auto_turns[slot].size(), "your_states": states,
+			"note": "Since your last move, these turns were played as Continue for you because it was your only option (mid-move, stunned, or frozen by something like a time stop). Set turns.forced_turns to never to be asked anyway."}
 	if actions.size() == 1 and actions[0]["action"] == "Continue":
 		# Mid-move or in hitstun: there is nothing to weigh but DI.
 		view["only_option"] = "Continue"
@@ -271,10 +293,15 @@ func submit(token: String, action: String, data, extra, source: String) -> Dicti
 	if not resolved["ok"]:
 		return {"ok": false, "error": "invalid_action", "message": resolved["error"]}
 	turn["applied"] = {"action": action, "data": resolved["data"], "extra": resolved["extra"], "source": source}
+	if source != "auto_forced":
+		_auto_turns[slot] = []
 	decisions.append({"tick": turn["tick"], "slot": slot, "action": action, "data": Util.json_safe(resolved["data"]),
 		"source": source, "think_ms": Util.now_ms() - turn["opened_ms"]})
 	ActionCatalog.submit(buttons, action, resolved["data"], resolved["extra"])
-	return {"ok": true, "turn_tick": turn["tick"], "applied": _applied_view(turn)}
+	var out = {"ok": true, "turn_tick": turn["tick"], "applied": _applied_view(turn)}
+	if resolved.has("notes"):
+		out["notes"] = resolved["notes"]
+	return out
 
 
 # A retry of a turn that was already locked in (say the reply to the first
@@ -361,15 +388,39 @@ func simulate(slot: String, mine: Dictionary, theirs, ticks: int) -> Dictionary:
 		yield(get_tree(), "idle_frame")
 		return {"ok": false, "error": "your action: %s" % mine_resolved["error"]}
 	actions[slot] = {"action": mine["action"], "data": mine_resolved["data"], "extra": mine_resolved["extra"]}
+	var notes = mine_resolved.get("notes", []).duplicate()
+	# Follow-ups for the decision points where only you act again (two-step
+	# moves): played in order whenever you become actionable in the preview.
+	var followups = []
+	var states_map = Util.prop(Util.prop(fighter, "state_machine", null), "states_map", {})
+	for step in mine.get("then", []) if mine.get("then") is Array else []:
+		if not (step is Dictionary) or str(step.get("action", "")) == "":
+			yield(get_tree(), "idle_frame")
+			return {"ok": false, "error": "then: each step needs an action"}
+		if not (states_map is Dictionary and states_map.has(str(step["action"]))):
+			yield(get_tree(), "idle_frame")
+			return {"ok": false, "error": "then: %s is not a move of this character" % step["action"]}
+		var step_extra = mine_resolved["extra"].duplicate(true)
+		step_extra["reverse"] = bool(step.get("extra", {}).get("reverse", false)) if step.get("extra") is Dictionary else false
+		step_extra["feint"] = false
+		followups.append({"action": str(step["action"]), "data": PayloadSpec._ints(PayloadSpec._unwrap(step.get("data"))), "extra": step_extra})
+	actions[slot]["then"] = followups
 	var other = Observation.other(slot)
-	var other_turn = turns.get(other)
+	# The opponent chooses at this decision point if they got a turn at this
+	# tick, even when they already locked in (their panel is inactive then).
+	var other_turn = turn_at(other, turn["tick"])
 	var choosing = [slot]
 	if other_turn != null or _was_choosing(other):
 		choosing.append(other)
+	if other_turn != null and not (theirs is Dictionary and theirs.has("action")):
+		# Assume they hold, with their own extras at neutral values.
+		var hold = ActionCatalog.resolve(_buttons(other), Observation.fighter_of(game, other), other_turn["catalog"], "Continue", null, {}, false)
+		if hold["ok"]:
+			actions[other] = {"action": "Continue", "data": null, "extra": hold["extra"]}
 	if theirs is Dictionary and theirs.has("action"):
 		if not (other in choosing):
 			yield(get_tree(), "idle_frame")
-			return {"ok": false, "error": "the opponent is mid-move and is not choosing this turn; omit opponent_action"}
+			return {"ok": false, "error": "the opponent has no turn at this decision point; omit opponent_action"}
 		var other_catalog = other_turn["catalog"] if other_turn != null else {}
 		if other_catalog.empty():
 			yield(get_tree(), "idle_frame")
@@ -380,8 +431,12 @@ func simulate(slot: String, mine: Dictionary, theirs, ticks: int) -> Dictionary:
 			yield(get_tree(), "idle_frame")
 			return {"ok": false, "error": "opponent action: %s" % theirs_resolved["error"]}
 		actions[other] = {"action": theirs["action"], "data": theirs_resolved["data"], "extra": theirs_resolved["extra"]}
+		for note in theirs_resolved.get("notes", []):
+			notes.append("opponent " + note)
 	var max_ticks = int(clamp(ticks if ticks > 0 else int(runtime.config.get_value("simulation.max_ticks", 120)), 10, 300))
 	var result = yield(runtime.simulator.run(game, actions, choosing, max_ticks, slot), "completed")
+	if not notes.empty() and result.get("ok", false):
+		result["notes"] = notes
 	return result
 
 
@@ -428,6 +483,8 @@ func _attach(current) -> void:
 	_decision_point = {}
 	_closed = {}
 	_closed_order = []
+	_auto_turns = {"p1": [], "p2": []}
+	_auto_at = {"p1": -1, "p2": -1}
 	_motion = {}
 	_motion_positions = {}
 	_motion_tick = -1
@@ -512,6 +569,9 @@ func _open_turn(slot: String, buttons, fighter) -> void:
 	var bot_controlled = controllers[slot] == "ai" or (controllers[slot] == "mcp" and owners[slot] != "")
 	if bot_controlled and _is_forced(catalog, fighter):
 		submit(turn["token"], "Continue", null, {}, "auto_forced")
+		_auto_at[slot] = tick
+		if _auto_turns[slot].size() < 50:
+			_auto_turns[slot].append(str(Util.prop(Util.call_or(fighter, "current_state"), "state_name", "?")))
 		return
 	emit_signal("turn_opened", slot, turn["token"])
 
@@ -593,6 +653,8 @@ func _record_history(tick: int) -> void:
 			var before = _decision_point.get(slot, {})
 			if before.get("busy", false):
 				entry[slot]["busy"] = true
+			if _auto_at[slot] == _last_decision_tick:
+				entry[slot]["auto"] = true
 			if before.get("busy", false) or action in ["Continue", "(busy)"]:
 				entry[slot]["state"] = before.get("state", "?")
 		if history.size() > 0:

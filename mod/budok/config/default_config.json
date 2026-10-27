@@ -38,6 +38,7 @@
       "allow_simulation": true,
       "max_simulations": 3,
       "memory_turns": 6,
+      "reflect_after_match": true,
       "style": "",
       "risk": "balanced",
       "refusal_fallback": true,
@@ -66,6 +67,11 @@
   "schemas": {
     "registry_enabled": false,
     "registry_url": ""
+  },
+  "memory": {
+    "enabled": true,
+    "shown_per_match": 6,
+    "max_per_subject": 100
   },
   "source_access": {
     "enabled": true,

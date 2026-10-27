@@ -23,9 +23,12 @@ client tool timeouts. Supported protocol versions: `2025-06-18`, `2025-03-26` an
 | `claim_slot` / `release_slot` | Take or return a slot for this session. Unclaimed `mcp` slots stay playable by the human. |
 | `wait_for_turn` | Long-poll. Returns `your_turn` with `turn_token`, `situation` (plain text), `observation`, `legal_actions` (with payload specs, measured frames and notes), `extras` and `payload_help` (how to fill each payload type). Can also return `waiting` (call again) or `match_over`. `detail`: `compact` (move names with payload types and a slim observation, about a fifth of the size), `summary` (default: short notes and frame data) or `full` (all notes, raw resources and the opponent's legal options). A turn where `Continue` is the only move is always minimal (`only_option`). |
 | `get_turn` | The open turn, without waiting. |
-| `simulate` | `{action, data?, extra?, opponent_action?, opponent_data?, opponent_extra?, ticks?}` runs a deterministic preview on the real engine from the current turn. It returns damage dealt and taken, end states, events (damage, state changes, spawned projectiles), objects still on screen with their speed per tick, frame advantage, when each side can act next, and `in_hitlag` when a fighter starts frozen in hitlag. The opponent's real choice is never used or revealed. |
+| `simulate` | `{action, data?, extra?, then?, opponent_action?, opponent_data?, opponent_extra?, ticks?}` runs a deterministic preview on the real engine from the current turn. It returns damage dealt and taken, end states, events (damage, state changes, spawned projectiles), objects still on screen with their speed per tick, frame advantage, when each side can act next, `in_hitlag` when a fighter starts frozen in hitlag, `you_act_again_at` when you get another decision inside the preview (a two-step move's follow-up, or a free turn while the opponent is busy), and `your_hitboxes` (active ticks and the closest gap to the opponent's body) so a miss can be explained. `then: [{action, data?, extra?}]` plays your follow-ups at those decisions. `opponent_action` works whenever the opponent has a turn at this decision point, even after they locked in. The opponent's real choice is never used or revealed. |
 | `submit_action` | `{turn_token, action, data?, extra?}` validates (legal, usable, payload, extras) and locks in. With `wait_for_outcome` (default on) it waits, at most `mcp.max_wait_s`, for the turn to resolve and returns what happened, including the opponent's revealed move. If the outcome is still `pending` (a slow human opponent), call `wait_for_turn`. On an error nothing is applied and you can retry with the same token. Retrying a move that was already locked in (say, after a lost reply) returns `ok` with `already_applied` and the outcome; a different move returns `already_submitted`. |
-| `get_match_log` | Resolved turn history, decisions and result. |
+| `get_match_log` | Resolved turn history, decisions and result. History entries mark players who were mid-move (`busy`, with the `state` that kept running) and turns budok played for a slot because Continue was the only option (`auto`). |
+| `remember` | `{text, character?, opponent?, tags?}` saves a lesson for future matches: about one character, a matchup (`character` playing against `opponent`) or general. `p1`/`p2` name the characters in the current match. Memories stay in this game install, are shared by every bot that plays here and record who wrote them. |
+| `recall` | `{character?, opponent?, query?, limit?, only_mine?}` lists memories, newest first; defaults to the characters in the current match. |
+| `forget` | `{id}` deletes one memory. |
 | `describe_character` | Measured data merged with notes for a character, a slot, or selected moves. |
 | `introspect_character` | Raw skeleton for writing notes (paged), optionally with the source of code-driven moves. |
 | `submit_character_schema` | Save notes (partial submissions merge). Returns actionable validation errors. |
@@ -45,8 +48,13 @@ client tool timeouts. Supported protocol versions: `2025-06-18`, `2025-03-26` an
 | `int` | A number. budok wraps it the way the game expects. |
 | `bool` | `true` or `false`. |
 | `option` | The option's name. |
+| `choice` | One of `choices` by name, for controls made of buttons, such as a parry's Block Height (`"High"` or `"Low"`). |
+| `fixed` | Nothing to choose this turn (for example Super Jump outside a combo, which always homes in); omit `data`. |
 | `object` | An object with the listed `fields`, each following its own spec. |
-| `opaque` | A value shaped like `default`. |
+| `opaque` | A value shaped like `default`. `script` names the control's script, which `read_source` can show. |
+
+When the game's control changes a value (an aim outside the move's allowed cone, a number out of range), the
+result of `submit_action` or `simulate` says so in `notes`.
 
 Clients that send `data` as JSON text (`"{\"x\": 10, \"y\": 0}"`) are understood too.
 
@@ -68,6 +76,9 @@ from the opponent, so a reversed lunge travels away from them.
   `Continue` (plus DI or burst when hit). History entries mark such players with `busy` and the state
   that kept running.
 - When `Continue` (Hold) is the only option and you are not being hit, budok submits it for you
-  (`turns.forced_turns`).
+  (`turns.forced_turns`). Your next turn then says how many turns were played this way and in which of
+  your states (`auto_continued`), for example while frozen by a time stop.
+- `start_match` and the first turn of a match include `memories`: lessons bots saved about these
+  characters before.
 - Timeouts (`turns.timeout_s.mcp`, default off) play `turns.fallback_action`.
 - If the human plays a bot's unclaimed slot from the UI, the turn closes as `resolved_elsewhere`.

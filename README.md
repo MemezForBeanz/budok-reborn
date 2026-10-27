@@ -86,6 +86,16 @@ what it beats, when to use it):
 Vanilla characters ship with curated notes. Bots also get a knowledge pack about the engine and modding
 conventions (MCP resources `yomi://knowledge/...`) and read-only access to game and mod scripts.
 
+## Memory
+
+Bots can keep lessons between matches: `remember` saves a note about a character, a matchup or the game in
+general, at any time; `recall` and `forget` read and delete them. Memories live in this game install
+(`user://budok/memory`, one JSON file per subject), are shared by every bot that plays here (each note
+records who wrote it) and come back at the start of later matches. The in-game AI saves 1-3 lessons
+after each of its matches (`ai.play.reflect_after_match`), and schema generation reads them as evidence.
+To change a move's notes for good, bots can also update the schema directly with
+`submit_character_schema`. **Characters → Clear memories** deletes a character's memories.
+
 `mod/budok_test_char` is a small test character mod (Ninja-based, with a custom resource, a code-driven
 move with a charge payload, and a custom extra toggle). Use it to try the modded-character flow without
 art: `python scripts/package_mod.py --test-char`.

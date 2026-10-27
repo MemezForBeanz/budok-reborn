@@ -50,7 +50,8 @@ Every setting below can be edited in game, under **main menu → Mod List → bu
 | `refusal_fallback` | `true` | `true` | On the Claude API, retry a declined request on a fallback model (`fallbacks: "default"`). |
 | `extra_body` | `{}` | `{}` | Merged into every request body (for example `reasoning_effort` for OpenAI reasoning models). |
 
-Play only: `allow_simulation`, `max_simulations` (per turn), `memory_turns`, `style` (free text such as
+Play only: `allow_simulation`, `max_simulations` (per turn), `memory_turns`, `reflect_after_match` (after
+each match, let the model save 1-3 lessons as memories; one short request), `style` (free text such as
 "aggressive rushdown"), `risk` (`cautious`, `balanced` or `reckless`).
 Annotate only: `batch_size` (moves per request), `include_source` and `max_source_chars` (attach code of
 code-driven moves), `auto_generate_missing` (annotate characters without notes when a match starts).
@@ -68,3 +69,6 @@ OpenAI-compatible server (default Ollama, `http://127.0.0.1:11434/v1`).
 | `automation.script` | `""` | GDScript with `func run(runtime)` started after boot. |
 | `ui.show_button` / `toggle_key` / `show_on_start` | `true` / `F8` / `false` | Corner button, overlay key, open on start. |
 | `logging.match_logs` | `true` | Write `user://budok/matches/<time>_<p1>_vs_<p2>.json` after each match. |
+| `memory.enabled` | `true` | Bots may save and recall memories (`user://budok/memory/<subject>.json`, one file per character, matchup or `general`). |
+| `memory.shown_per_match` | `6` | Memories shown at match start (in `start_match`, the first turn and the token-mode prompt). |
+| `memory.max_per_subject` | `100` | Oldest memories of a subject are dropped past this. |

@@ -71,6 +71,9 @@ static func play_system(runtime, slot: String) -> String:
 		"# Your character\n" + character_primer(infos.get(slot, {})),
 		"# Opponent's character\n" + character_primer(infos.get(other, {}), 30),
 	]
+	var memories = runtime.match_memories(10)
+	if not memories.empty():
+		parts.append("# What bots remember from earlier matches\n- " + PoolStringArray(runtime.memory.lines(memories)).join("\n- "))
 	var style = str(play_cfg.get("style", ""))
 	if style != "":
 		parts.append("# Play style requested by the player\n" + style)
@@ -97,6 +100,7 @@ static func play_match_prompt(runtime, slot: String) -> String:
 		"2. Optionally describe_character for move notes and simulate 1-3 candidate moves against likely opponent answers.",
 		"3. Call submit_action with the turn_token. It waits for the turn to resolve and tells you what the opponent did.",
 		"4. Repeat until wait_for_turn returns match_over. Keep each turn's reasoning short. Matches have many turns.",
+		"5. Whenever you learn something worth keeping (how a character really behaves, what works in this matchup), save it with remember; after the match, save the 1-3 most useful lessons.",
 	]).join("\n")
 
 

@@ -206,9 +206,9 @@
     },
     "ParryHigh": {
       "category": "defense",
-      "summary": "Block high/mid attacks. Parry timing count sets active parry frames (1-20).",
-      "beats": "attacks, projectiles",
-      "loses_to": "loses to grabs, does no damage"
+      "summary": "Block: guards against attacks. Block Height: High stops mid and high attacks, Low stops lows; the wrong height still takes about half the damage. Melee Parry Timing: the tick, counted from now, when the attack's hit arrives; exact timing parries it for no damage, otherwise you block and take chip damage. Against a move started now, use its startup.",
+      "beats": "attacks, especially predictable ones with known startup",
+      "loses_to": "throws; the wrong block height; mixups between high and low"
     },
     "ParrySuper": {
       "category": "defense",

@@ -86,7 +86,8 @@ func _run() -> void:
 	budok_tabs.show()
 	yield(self, "idle_frame")
 	var screen = menu.get_viewport_rect().size
-	check(menu.rect_size == (screen - Vector2(20, 20)).floor() and menu.rect_position == Vector2(10, 10), "Mod List window fits the screen on the budok tab")
+	check(menu.rect_size == (screen - Vector2(20, 28)).floor() and menu.rect_position == Vector2(10, 18), "Mod List window fits the screen on the budok tab")
+	check(runtime.panel._toggle.visible, "corner button stays visible")
 	budok_tabs.hide()
 	yield(self, "idle_frame")
 	check(menu.rect_size == Vector2(400, 220), "Mod List window size restored")

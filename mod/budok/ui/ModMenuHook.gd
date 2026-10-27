@@ -10,12 +10,14 @@ extends Node
 # it can end up taller than the screen. While budok's tab is open we size it to
 # the screen; when another mod is picked or the window closes, it gets its own
 # size and position back. The title bar's "Open Mods Folder" button sits at a
-# fixed x, so it moves with the right edge.
+# fixed x, so it moves with the right edge. The window starts below the corner
+# budok button (ui/Panel.gd) so the two never overlap.
 
 const Util = preload("res://budok/core/Util.gd")
 const SettingsView = preload("res://budok/ui/SettingsView.gd")
 const CHECK_INTERVAL := 1.0
 const SCREEN_MARGIN := Vector2(10, 10)
+const TOP_MARGIN := 18
 
 var runtime = null
 var view = null
@@ -36,7 +38,7 @@ func attached() -> bool:
 
 
 func showing() -> bool:
-	return Util.valid(_container) and Util.valid(_menu) and _container.is_visible_in_tree()
+	return Util.valid(_container) and Util.valid(_menu) and _menu.is_visible_in_tree() and _container.is_visible_in_tree()
 
 
 func _process(delta: float) -> void:
@@ -79,12 +81,12 @@ func _on_visibility_changed() -> void:
 
 
 func _fit_size() -> Vector2:
-	return (_menu.get_viewport_rect().size - SCREEN_MARGIN * 2).floor()
+	return (_menu.get_viewport_rect().size - Vector2(SCREEN_MARGIN.x * 2, SCREEN_MARGIN.y + TOP_MARGIN)).floor()
 
 
 func _fit() -> void:
 	_menu.rect_size = _fit_size()
-	_menu.rect_position = SCREEN_MARGIN
+	_menu.rect_position = Vector2(SCREEN_MARGIN.x, TOP_MARGIN)
 	_place_folder_button()
 
 

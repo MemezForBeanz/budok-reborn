@@ -24,8 +24,11 @@ pauses for the next decision point.
 ## Core interactions (rock-paper-scissors with frame data)
 
 - **Attacks** beat grabs and movement once their hitbox comes out (startup frames). Faster startup wins trades.
-- **Blocking / parrying** (`ParryHigh`, other defense moves) beats attacks. A parry needs the right timing
-  and height: low hits must be blocked low. Many parry moves take a timing/height payload.
+- **Blocking / parrying** (`ParryHigh`, shown as Block) beats attacks. Its payload has a Block Height
+  (`High` stops mid and high hits, `Low` stops lows; the wrong height still takes about half the damage)
+  and a Melee Parry Timing: the tick, counted from now, when the hit arrives. Exact timing parries the hit
+  for no damage; otherwise it is a block with chip damage (about a third). Against an attack started now,
+  the timing is its `startup`; simulate to check.
 - **Grabs** beat blocking. They lose to attacks and to jumping or moving away.
 - **Movement** (dashes, jumps, rolls) sets spacing. Some movement has invulnerability windows.
 - **Frame advantage**: after an exchange, whoever becomes actionable first acts first next turn.
@@ -75,4 +78,14 @@ pauses for the next decision point.
    or hold). Simulations run on the real engine and are deterministic.
 4. Mix up. Repeating the same move is easy for a human (or another bot) to read. `history` shows
    your own patterns too.
-5. Submit. On an `invalid_action` error, fix the action and resubmit with the same token.
+5. Submit. On an `invalid_action` error, fix the action and resubmit with the same token. Read `notes` in
+   the result: they say when the game changed your input (an aim outside the move's cone, a number out of
+   range).
+6. Remember. When you learn how a character really behaves or what works in a matchup, save it with
+   `remember` (one concrete lesson each). Memories come back in later matches, for you and other bots.
+
+## Moves with more than one step
+
+Some moves stop after a few ticks and give you another decision (a follow-up, such as a dash that then
+asks where to go). In `simulate`, `you_act_again_at` lists those decisions. Without `then` the preview
+assumes you Continue there; pass `then: [{action, data}]` to preview the follow-up you plan.

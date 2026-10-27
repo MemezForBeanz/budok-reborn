@@ -2,8 +2,8 @@ extends Node
 
 # Wires every budok service together and exposes the in-process API used by
 # MCP tools, the token-mode AI and automation scripts:
-#   runtime.config / roster / schemas / sources / matches / simulator / mcp /
-#   llm / autopilot / annotator, plus the helpers below.
+#   runtime.config / roster / schemas / memory / sources / matches / simulator /
+#   mcp / llm / autopilot / annotator, plus the helpers below.
 
 signal status_changed()
 
@@ -12,6 +12,7 @@ const Config = preload("res://budok/core/Config.gd")
 const Roster = preload("res://budok/core/Roster.gd")
 const Introspector = preload("res://budok/core/Introspector.gd")
 const SchemaStore = preload("res://budok/core/SchemaStore.gd")
+const Memory = preload("res://budok/core/Memory.gd")
 const SourceBrowser = preload("res://budok/core/SourceBrowser.gd")
 const MatchController = preload("res://budok/core/MatchController.gd")
 const Simulator = preload("res://budok/core/Simulator.gd")
@@ -30,6 +31,7 @@ var config = null
 var roster = null
 var introspector = null
 var schemas = null
+var memory = null
 var sources = null
 var matches = null
 var simulator = null
@@ -51,6 +53,8 @@ func _ready() -> void:
 	roster = Roster.new()
 	introspector = Introspector.new()
 	schemas = SchemaStore.new(introspector)
+	memory = Memory.new()
+	memory.max_per_subject = int(config.get_value("memory.max_per_subject", 100))
 	sources = SourceBrowser.new()
 	sources.max_file_bytes = int(config.get_value("source_access.max_file_bytes", 200000))
 	simulator = _add(Simulator.new(), "Simulator")
@@ -174,7 +178,22 @@ func describe_character(entry: Dictionary, only_moves) -> Dictionary:
 		"resources": resources,
 		"extras": schema.get("extras", {}),
 		"moves": moves,
+		"memories": Memory.lines(memory.recall([info["character"]], "", 10)) if bool(config.get_value("memory.enabled", true)) else [],
 	}
+
+
+# Memories about the characters in the current match and their matchups.
+func match_memories(limit: int = -1) -> Array:
+	if not bool(config.get_value("memory.enabled", true)):
+		return []
+	var names = []
+	for slot in ["p1", "p2"]:
+		var entry = matches.match_info.get("characters", {}).get(slot)
+		if entry is Dictionary and not (entry["display_name"] in names):
+			names.append(entry["display_name"])
+	if names.empty():
+		return []
+	return memory.recall(names, "", limit if limit >= 0 else int(config.get_value("memory.shown_per_match", 6)))
 
 
 func introspect_character(entry: Dictionary, only_moves, include_source: bool, offset: int, limit: int) -> Dictionary:

@@ -93,10 +93,16 @@ static func resolve(buttons, fighter, catalog: Dictionary, action: String, data,
 	var fighter_extra = Util.prop(buttons, "fighter_extra", null)
 	if touch_ui and Util.valid(fighter_extra) and fighter_extra.has_method("update_selected_move"):
 		fighter_extra.update_selected_move(state)
-	var extra_result = _resolve_extra(buttons, fighter, catalog, action, state, extra if extra is Dictionary else {}, touch_ui)
+	var notes = []
+	if data_result.has("note"):
+		notes.append("data: " + data_result["note"])
+	var extra_result = _resolve_extra(buttons, fighter, catalog, action, state, extra if extra is Dictionary else {}, touch_ui, notes)
 	if not extra_result["ok"]:
 		return extra_result
-	return {"ok": true, "data": data_result["value"], "extra": extra_result["value"]}
+	var out = {"ok": true, "data": data_result["value"], "extra": extra_result["value"]}
+	if not notes.empty():
+		out["notes"] = notes
+	return out
 
 
 static func submit(buttons, action: String, data, extra: Dictionary) -> void:
@@ -115,16 +121,35 @@ static func _wants_reverse(buttons, action: String, extra) -> bool:
 # The game's panel turns a move's aim controls toward the opponent, or away
 # from them when Reverse is ticked (ActionButtons.send_ui_action); do the same
 # before setting a value, so aim limits and allowed directions match the UI.
+# The data node only passes facing to its direct children, so aim pads nested
+# inside other containers (common in modded moves) are turned here as well.
 static func _face_data_node(data_node, fighter, reverse: bool) -> void:
-	if not Util.valid(data_node) or not data_node.has_method("get_facing") or not data_node.has_method("set_facing"):
+	if not Util.valid(data_node):
 		return
-	var current = data_node.get_facing()
 	var wanted = Util.as_int(Util.call_or(fighter, "get_opponent_dir", [], 0)) * (-1 if reverse else 1)
-	if current != null and wanted != 0 and int(current) != wanted:
-		data_node.set_facing(wanted)
+	if wanted == 0:
+		return
+	if data_node.has_method("get_facing") and data_node.has_method("set_facing"):
+		var current = data_node.get_facing()
+		if current != null and int(current) != wanted:
+			data_node.set_facing(wanted)
+	var pads = []
+	_aim_controls(data_node, pads, 0)
+	for pad in pads:
+		if Util.as_int(pad.facing) != wanted:
+			pad.facing = wanted
 
 
-static func _resolve_extra(buttons, _fighter, catalog: Dictionary, action: String, state, requested: Dictionary, touch_ui: bool) -> Dictionary:
+# XYPlot and 8Way controls (they mirror themselves when `facing` changes).
+static func _aim_controls(node: Node, out: Array, depth: int) -> void:
+	for child in node.get_children():
+		if Util.has_prop(child, "facing") and (Util.has_prop(child, "panel_radius") or (Util.has_prop(child, "NE") and Util.has_prop(child, "SW"))):
+			out.append(child)
+		elif depth < 4:
+			_aim_controls(child, out, depth + 1)
+
+
+static func _resolve_extra(buttons, _fighter, catalog: Dictionary, action: String, state, requested: Dictionary, touch_ui: bool, notes: Array) -> Dictionary:
 	# Passive resolution must not read the other player's in-progress UI
 	# choices, so it starts from neutral extras instead of the panel's.
 	var base = {"DI": {"x": 0, "y": 0}, "reverse": false, "feint": false, "prediction": -1}
@@ -153,6 +178,8 @@ static func _resolve_extra(buttons, _fighter, catalog: Dictionary, action: Strin
 			if not di["ok"]:
 				return {"ok": false, "error": "extra.di: %s" % di["error"]}
 			extra["DI"] = di["value"]
+			if di.has("note"):
+				notes.append("extra.di: " + di["note"])
 		elif lower == "reverse":
 			if bool(value) and not _reversible(_button_for(buttons, action)):
 				return {"ok": false, "error": "'%s' cannot be reversed" % action}

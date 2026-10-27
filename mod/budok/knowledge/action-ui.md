@@ -19,6 +19,8 @@ Each move button may own a **data UI scene** (an `ActionUIData` node). When lock
 | HorizSlider | `{"x": int}` | `int` (wraps as `x`) |
 | CheckButton | `true` / `false` | `bool` |
 | OptionButton | `{"id": int, "name": String}` | `option` (pass the name) |
+| Button groups (the parry's Block Height: High / Low) | whatever the control's `get_data()` builds from the pressed button, such as `{"x": 0, "y": 0}` for High | `choice` (pass the button's name) |
+| A data UI whose controls are all hidden (Super Jump outside a combo sends `"homing"`) | a fixed value | `fixed` (omit data) |
 
 Every payload has a `default`, the value the game would send if a player clicked the move without
 touching its controls. Omit `data` to use it.
