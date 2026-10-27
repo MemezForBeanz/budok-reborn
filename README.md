@@ -24,11 +24,16 @@ You must own the game. Everything runs locally. Online and lobby matches are nev
 1. Build `budok.zip` with `python scripts/package_mod.py` (it lands in `dist/`).
 2. Put the zip in the game's `mods/` folder (next to the game executable; create it if needed). Leave it
    zipped.
-3. Start the game. A **budok** button appears in the top-right corner; F8 toggles the panel.
+3. Start the game. All settings live in the game's own mod settings: **main menu → Mod List → budok**
+   (tabs Connect, Players, AI, Providers, Characters, Advanced). The same tabs are also on the F8
+   overlay and the small **budok** button in the top-right corner, which you can turn off under
+   Advanced.
+4. Optional check: `python connectors/python/selftest.py --token <token>` plays a short match through
+   MCP (both sides random moves, a few simulations) and reports problems.
 
 ## Connect a chatbot (MCP)
 
-The panel's **Connect** tab shows the server URL (default `http://127.0.0.1:8765/mcp`) and a secret token,
+The **Connect** tab shows the server URL (default `http://127.0.0.1:8765/mcp`) and a secret token,
 with copy buttons for ready-made configs:
 
 - **Claude Code**: `claude mcp add --transport http budok http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"`
@@ -47,13 +52,14 @@ game UI. The `play_match` MCP prompt gives it the rules and both characters' not
 
 ## Let the mod play by itself (token mode)
 
-In the panel's **AI** tab:
+In the **AI** tab (keys go in **Providers**):
 
 - **Move making**: provider, model, effort, tool steps, simulations per turn, play style and risk.
 - **Schema creation**: a separate provider and model for writing notes on modded characters (a strong
   model is worth it, since this runs once per character).
-- API keys for Anthropic, OpenAI and OpenRouter (stored in `user://budok/config.json`, or read from the
-  usual environment variables), plus the URL of a local OpenAI-compatible server (Ollama, LM Studio).
+- **Providers** tab: API keys for Anthropic, OpenAI and OpenRouter (stored in `user://budok/config.json`,
+  or read from the usual environment variables), plus the URL of a local OpenAI-compatible server
+  (Ollama, LM Studio).
 
 Then set a slot to `ai` in the **Players** tab, or start a match with `controllers: {"p2": "ai"}`. Each
 turn the model gets the situation, can simulate candidate moves and must submit one. Turn timeouts fall
@@ -94,10 +100,14 @@ See [docs/automation.md](docs/automation.md).
 
 ```bash
 uv sync                      # dev tools: pytest, jsonschema, ruff
-uv run pytest                # data, consistency, GDScript syntax (needs gdtoolkit 3.x), connector, packaging
-godot --no-window --path mod -s res://tests/run_tests.gd   # GDScript unit tests (Godot 3.5)
+uv run pytest                # data, consistency, GDScript syntax (gdtoolkit 3.x), connector, packaging
+GODOT_BIN=/path/to/godot-3.5.1 uv run pytest   # adds real-compiler, unit and settings-UI checks
 python scripts/package_mod.py --test-char --install "<game>/mods"
 ```
+
+Always run the Godot checks before shipping. Godot 3 has built-in functions (`to_json`, `parse_json`),
+keywords (`tool`) and virtuals (`_notification`) that a syntax-only parser accepts but the real compiler
+rejects. A single compile error stops the whole mod from loading.
 
 Layout: `mod/budok/` (the mod: `core/` game adapter, `mcp/` server, `ai/` token mode, `ui/`,
 `knowledge/`, `schemas/`), `mod/budok_test_char/`, `connectors/python/`, `docs/`, `tests/`.

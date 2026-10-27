@@ -19,7 +19,8 @@ const McpServer = preload("res://budok/mcp/McpServer.gd")
 const LlmClient = preload("res://budok/ai/LlmClient.gd")
 const AutoPilot = preload("res://budok/ai/AutoPilot.gd")
 const Annotator = preload("res://budok/ai/Annotator.gd")
-const Panel = preload("res://budok/ui/Panel.gd")
+const OverlayPanel = preload("res://budok/ui/Panel.gd")
+const ModMenuHook = preload("res://budok/ui/ModMenuHook.gd")
 const Automation = preload("res://budok/automation/Automation.gd")
 const METADATA_PATH := "res://budok/_metadata"
 
@@ -35,6 +36,7 @@ var llm = null
 var autopilot = null
 var annotator = null
 var panel = null
+var mod_menu = null
 var automation = null
 var server_state := {}
 var _version := ""
@@ -60,8 +62,10 @@ func _ready() -> void:
 	mcp = _add(McpServer.new(), "Mcp")
 	mcp.setup(self)
 	restart_server()
-	panel = _add(Panel.new(), "Panel")
+	panel = _add(OverlayPanel.new(), "Panel")
 	panel.setup(self)
+	mod_menu = _add(ModMenuHook.new(), "ModMenuHook")
+	mod_menu.setup(self)
 	automation = _add(Automation.new(), "Automation")
 	automation.setup(self)
 	matches.connect("match_started", self, "_on_match_changed")

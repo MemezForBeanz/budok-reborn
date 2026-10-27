@@ -45,7 +45,8 @@ Hitbox nodes under a state carry `damage`, `start_tick`, `active_ticks`, `hitstu
 (High/Mid/Low), `hitbox_type` (Normal, Flip, ThrowHit, Burst, NoHitstun, Detect...), knockback
 (`dir_x`, `dir_y`, `knockback` as fixed strings), `plus_frames`, `guard_break`, `knockdown`, `wall_slam`,
 `hits_otg`, `beats_grab` and `followup_state`. `ThrowBox` adds `throw_state` (a grab). `Detect` boxes
-deal no damage; they are used to trigger follow-ups.
+deal no damage; they are used to trigger follow-ups. At runtime a state reaches its hitboxes through
+`all_hitbox_nodes` (and the fighter through `host.hitboxes`); don't rely on `$Hitbox` paths.
 
 ## Extras panel
 

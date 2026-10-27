@@ -19,14 +19,15 @@ The skeleton gets a **fingerprint**. When the mod changes the character, stored 
 
 ## Notes ("schema") lookup order
 
-1. `user://budok/schemas/<name>.json` with `"override": true` (a player's own override)
+1. `user://budok/schemas/<mod folder>__<Character>.json` with `"override": true` (a player's own override)
 2. **Shipped in the character's mod**:
    - `<scene path without .tscn>.budok.json`, for example `res://MyMod/Kirby.budok.json` next to
      `res://MyMod/Kirby.tscn`
    - `res://<ModFolder>/budok/<Character>.json`
    - `res://<ModFolder>/budok_schema.json`: one schema, or `{"characters": {"Name": {...}}}`
 3. Bundled with budok (vanilla characters)
-4. `user://budok/schemas/<name>.json` (generated or hand-written)
+4. `user://budok/schemas/<mod folder>__<Character>.json` (generated or hand-written; survives mod updates,
+   and is flagged stale if the character's moves changed)
 5. Registry cache (opt-in)
 
 ## For mod authors

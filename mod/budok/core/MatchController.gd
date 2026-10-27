@@ -114,10 +114,10 @@ func prepare_new_match() -> void:
 	_starting = true
 
 
-func claim(slot: String, session_id: String) -> Dictionary:
+func claim(slot: String, session_id: String, force: bool = false) -> Dictionary:
 	if not (slot in SLOTS):
 		return {"ok": false, "error": "slot must be p1 or p2"}
-	if owners[slot] != "" and owners[slot] != session_id:
+	if owners[slot] != "" and owners[slot] != session_id and not force:
 		return {"ok": false, "error": "%s is already claimed by another MCP session; ask its owner to release it" % slot}
 	owners[slot] = session_id
 	controllers[slot] = "mcp"
@@ -158,7 +158,7 @@ func turn_for_token(token: String):
 # Everything a decision-maker needs for one open turn.
 func turn_view(slot: String, detail: String = "summary") -> Dictionary:
 	var turn = turns.get(slot)
-	if turn == null:
+	if turn == null or turn.has("applied"):
 		return {}
 	var obs = Observation.build(game, slot, _infos(), history, detail)
 	var view = {
@@ -186,6 +186,9 @@ func submit(token: String, action: String, data, extra, source: String) -> Dicti
 	var turn = turn_for_token(token)
 	if turn == null:
 		return {"ok": false, "error": "stale_turn", "message": "turn token is not open (already decided, timed out or the match moved on); call wait_for_turn"}
+	if turn.has("applied"):
+		return {"ok": false, "error": "already_submitted", "message": "this turn was already decided (%s by %s); call wait_for_turn" % [
+			turn["applied"]["action"], turn["applied"]["source"]]}
 	var slot = turn["slot"]
 	var buttons = _buttons(slot)
 	var fighter = Observation.fighter_of(game, slot)

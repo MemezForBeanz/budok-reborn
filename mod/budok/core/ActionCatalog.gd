@@ -197,16 +197,16 @@ static func _extras(buttons, fighter) -> Dictionary:
 # toggle silently and diffing the result, then restoring it.
 static func _map_toggles(fighter_extra, sample: Dictionary) -> Dictionary:
 	var mapping = {}
-	var before = Util.to_json(sample, true)
+	var before = Util.json_str(sample, true)
 	for button in _toggles(fighter_extra):
 		var original = bool(button.pressed)
 		button.set_pressed_no_signal(not original)
 		var after = fighter_extra.get_extra()
 		button.set_pressed_no_signal(original)
-		if not (after is Dictionary) or Util.to_json(after, true) == before:
+		if not (after is Dictionary) or Util.json_str(after, true) == before:
 			continue
 		for key in after:
-			if sample.has(key) and Util.to_json(after[key]) != Util.to_json(sample[key]) and not mapping.has(key):
+			if sample.has(key) and Util.json_str(after[key]) != Util.json_str(sample[key]) and not mapping.has(key):
 				mapping[key] = button
 	return mapping
 

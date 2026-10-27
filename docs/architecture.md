@@ -23,7 +23,9 @@ YOMI Hustle process
    ├─ ai/LlmClient          Anthropic Messages API / OpenAI-compatible chat via HTTPRequest
    ├─ ai/AutoPilot          token mode player (controller "ai")
    ├─ ai/Annotator          token mode schema writer
-   ├─ ui/Panel              F8 panel
+   ├─ ui/SettingsView       all settings as tabs (one field table)
+   ├─ ui/ModMenuHook        adds those tabs to the game's Mod List → budok entry
+   ├─ ui/Panel              same tabs on the F8 overlay
    └─ automation/Automation optional user GDScript
 ```
 

@@ -53,7 +53,7 @@ func start(entry: Dictionary, force: bool = false) -> Dictionary:
 	if not force and info["coverage"]["missing"].empty() and info["coverage"]["has_summary"]:
 		return {"ok": true, "message": "%s already has complete notes (%s); pass force=true to regenerate" % [entry["display_name"], info["status"]]}
 	jobs[key] = {"character": entry["display_name"], "status": "running", "progress": "starting", "model": role["model"],
-		"started": OS.get_datetime_string_from_system(), "errors": []}
+		"started": Time.get_datetime_string_from_system(), "errors": []}
 	emit_signal("job_changed", jobs[key])
 	_run(entry, force)
 	return {"ok": true, "job": jobs[key], "message": "annotation started; poll get_status"}
@@ -78,7 +78,7 @@ func _run(entry: Dictionary, force: bool) -> void:
 	todo.sort()
 	var batch_size = int(max(1, int(cfg.get("batch_size", 10))))
 	var system = Prompts.annotate_system()
-	var provenance = {"by": "budok-annotator", "provider": cfg.get("provider", ""), "model": cfg.get("model", ""), "at": OS.get_datetime_string_from_system()}
+	var provenance = {"by": "budok-annotator", "provider": cfg.get("provider", ""), "model": cfg.get("model", ""), "at": Time.get_datetime_string_from_system()}
 	var batch_start = 0
 	while batch_start < todo.size():
 		var batch = todo.slice(batch_start, int(min(todo.size(), batch_start + batch_size)) - 1)
@@ -138,7 +138,7 @@ func _converse(entry: Dictionary, system: String, prompt: String, provenance: Di
 					output = runtime.sources.search(str(input.get("query", "")), prefix)
 				_:
 					output = {"ok": false, "error": "unknown tool"}
-			results.append({"id": tool_call["id"], "content": Util.truncate(Util.to_json(output), 20000), "is_error": not output.get("ok", true)})
+			results.append({"id": tool_call["id"], "content": Util.truncate(Util.json_str(output), 20000), "is_error": not output.get("ok", true)})
 		messages += llm.tool_results("annotate", results)
 		if saved and _all_ok(results):
 			return true
@@ -161,10 +161,10 @@ func _batch_prompt(entry: Dictionary, skeleton: Dictionary, batch: Array, cfg: D
 				sources.append("### %s (%s)\n%s" % [move_name, move["script_path"], excerpt])
 	var parts = [
 		"Character: %s (scene %s, %s)." % [entry["display_name"], entry["scene_path"], entry["source"]],
-		"Stats: " + Util.to_json(skeleton.get("stats", {})),
-		"Character resources (script variables): " + Util.to_json(skeleton.get("resources", {})),
+		"Stats: " + Util.json_str(skeleton.get("stats", {})),
+		"Character resources (script variables): " + Util.json_str(skeleton.get("resources", {})),
 		"Fighter script: %s" % skeleton.get("script_path", ""),
-		"Moves to annotate now (measured data):\n" + Util.to_json(moves),
+		"Moves to annotate now (measured data):\n" + Util.json_str(moves),
 	]
 	if not sources.empty():
 		parts.append("Scripts of code-driven moves:\n" + PoolStringArray(sources).join("\n\n"))
@@ -176,9 +176,9 @@ func _summary_prompt(entry: Dictionary, skeleton: Dictionary) -> String:
 	var info = runtime.schemas.describe(entry)
 	return PoolStringArray([
 		"Character: %s. All move notes so far:" % entry["display_name"],
-		Util.to_json(info["schema"].get("moves", {})),
-		"Stats: " + Util.to_json(skeleton.get("stats", {})),
-		"Resources: " + Util.to_json(skeleton.get("resources", {})),
+		Util.json_str(info["schema"].get("moves", {})),
+		"Stats: " + Util.json_str(skeleton.get("stats", {})),
+		"Resources: " + Util.json_str(skeleton.get("resources", {})),
 		"Fighter script: %s (read it for passives and resource rules)." % skeleton.get("script_path", ""),
 		"Now submit the summary (archetype, game_plan, strengths, weaknesses, tips) and a meaning/label for each gameplay-relevant resource (hide internal bookkeeping ones with hidden=true), via submit_character_schema.",
 	]).join("\n\n")

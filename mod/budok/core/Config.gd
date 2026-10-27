@@ -27,14 +27,14 @@ func load_config() -> void:
 
 
 func get_value(path: String, default_value = null):
-	return Util.get_path(data, path, default_value)
+	return Util.dig(data, path, default_value)
 
 
 # Writes go to both the merged view and the user overlay so that save() only
 # persists what the player actually changed.
 func set_value(path: String, value) -> void:
-	Util.set_path(data, path, value)
-	Util.set_path(_user, path, value)
+	Util.plant(data, path, value)
+	Util.plant(_user, path, value)
 
 
 func save() -> bool:

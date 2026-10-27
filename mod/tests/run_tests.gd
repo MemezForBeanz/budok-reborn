@@ -38,7 +38,7 @@ func check(condition: bool, label: String) -> void:
 
 # Godot 3 compares Dictionaries by reference; compare contents instead.
 func same(a, b) -> bool:
-	return Util.to_json(a, true) == Util.to_json(b, true)
+	return Util.json_str(a, true) == Util.json_str(b, true)
 
 
 func make(source: String, base: String = "Node"):
@@ -52,8 +52,8 @@ func _test_util() -> void:
 	var merged = Util.deep_merge({"a": {"b": 1, "c": 2}, "d": 1}, {"a": {"b": 5}, "e": 3})
 	check(merged["a"]["b"] == 5 and merged["a"]["c"] == 2 and merged["e"] == 3, "deep_merge keeps and overrides keys")
 	var data = {}
-	Util.set_path(data, "x.y.z", 4)
-	check(Util.get_path(data, "x.y.z") == 4 and Util.get_path(data, "x.q", "d") == "d", "set_path / get_path")
+	Util.plant(data, "x.y.z", 4)
+	check(Util.dig(data, "x.y.z") == 4 and Util.dig(data, "x.q", "d") == "d", "set_path / get_path")
 	check(Util.strip_trailing_digits("Bullet12") == "Bullet" and Util.strip_trailing_digits("42") == "42", "strip_trailing_digits")
 	check(same(Util.json_safe(Vector2(1.5, 2)), {"x": 1.5, "y": 2.0}), "json_safe Vector2")
 	check(Util.as_int("3.6") == 4 and Util.as_int(2.0) == 2 and Util.as_int(null, 7) == 7, "as_int")

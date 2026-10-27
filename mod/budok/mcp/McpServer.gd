@@ -99,7 +99,7 @@ func _on_request(conn_id: int, req: Dictionary) -> void:
 
 func _handle_post(conn_id: int, req: Dictionary) -> void:
 	var headers = req["headers"]
-	var parsed = Util.parse_json(req["body"])
+	var parsed = Util.json_parse(req["body"])
 	if not parsed["ok"]:
 		_respond_json(conn_id, 400, _rpc_error(null, -32700, "parse error: %s" % parsed["error"]), headers)
 		return
@@ -124,7 +124,7 @@ func _handle_post(conn_id: int, req: Dictionary) -> void:
 		elif msg.has("method") and msg.has("id"):
 			requests.append(msg)
 		elif msg.has("method"):
-			_notification(msg, sid)
+			_handle_notification(msg, sid)
 	if requests.empty():
 		_respond_raw(conn_id, 202, "", headers, _session_header(new_session))
 		return
@@ -237,13 +237,13 @@ func _call_tool(id, params: Dictionary, sid: String):
 	if not (raw is Dictionary):
 		raw = {"ok": false, "error": "tool returned no result"}
 	var is_error = raw.has("error") and raw.get("ok", false) != true
-	var result = {"content": [{"type": "text", "text": Util.to_json(raw)}], "isError": is_error}
+	var result = {"content": [{"type": "text", "text": Util.json_str(raw)}], "isError": is_error}
 	if str(sessions.get(sid, {}).get("protocol", "")) >= "2025-06-18":
 		result["structuredContent"] = raw
 	return _rpc_result(id, result)
 
 
-func _notification(msg: Dictionary, sid: String) -> void:
+func _handle_notification(msg: Dictionary, sid: String) -> void:
 	if str(msg.get("method")) == "notifications/initialized":
 		sessions[sid]["initialized"] = true
 
@@ -319,7 +319,7 @@ func _respond_json(conn_id: int, status: int, value, req_headers: Dictionary, ex
 	for key in extra:
 		headers[key] = extra[key]
 	_add_cors(headers, req_headers)
-	http.respond(conn_id, status, headers, Util.to_json(value))
+	http.respond(conn_id, status, headers, Util.json_str(value))
 
 
 func _respond_raw(conn_id: int, status: int, body: String, req_headers: Dictionary, extra: Dictionary = {}) -> void:

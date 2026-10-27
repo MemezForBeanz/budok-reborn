@@ -75,6 +75,7 @@
     "script": ""
   },
   "ui": {
+    "show_button": true,
     "toggle_key": "F8",
     "show_on_start": false
   },

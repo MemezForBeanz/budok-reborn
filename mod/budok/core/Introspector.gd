@@ -78,7 +78,7 @@ func _build(fighter, entry: Dictionary) -> Dictionary:
 		"other_states": other_states,
 	}
 	sources.sort()
-	var fingerprint_input = Util.to_json(skeleton, true) + "|" + PoolStringArray(sources).join(",")
+	var fingerprint_input = Util.json_str(skeleton, true) + "|" + PoolStringArray(sources).join(",")
 	skeleton["fingerprint"] = fingerprint_input.sha256_text().substr(0, 16)
 	return skeleton
 
@@ -163,11 +163,15 @@ func _describe_state(state) -> Dictionary:
 	var supers_used = Util.as_int(Util.prop(state, "supers_used_", -1))
 	var chain = Util.script_chain(state)
 	var title = str(Util.prop(state, "title", ""))
+	# A state can be picked only if it is shown and lists the cancel categories
+	# it can be entered from (hurt / grabbed / knockdown states have none).
+	var selectable = bool(Util.prop(state, "show_in_menu", true)) and bool(Util.prop(state, "selectable", true)) \
+		and not _categories(Util.prop(state, "interrupt_from_string", "")).empty()
 	var info = {
 		"name": str(state.name),
 		"title": title if title != "" else str(state.name),
 		"type": Util.enum_name(ACTION_TYPES, Util.prop(state, "type", 0)),
-		"selectable": bool(Util.prop(state, "show_in_menu", true)) and bool(Util.prop(state, "selectable", true)),
+		"selectable": selectable,
 		"air": Util.enum_name(AIR_TYPES, Util.prop(state, "air_type", 0)),
 		"uses_air_option": bool(Util.prop(state, "uses_air_movement", false)),
 		"meter_bars": supers_used if supers_used >= 0 else super_level,

@@ -1,9 +1,15 @@
 # Settings
 
 Defaults ship in `mod/budok/config/default_config.json`. Your changes are saved to
-`user://budok/config.json` (on Windows `%APPDATA%\Godot\app_userdata\<game>\budok\config.json`; the panel's
-export messages show absolute paths). The in-game panel (F8) edits the common ones. The file can hold
-everything below.
+`user://budok/config.json`:
+
+| OS | Path |
+|---|---|
+| Windows | `%APPDATA%\YourOnlyMoveIsHUSTLE\budok\config.json` |
+| macOS | `~/Library/Application Support/YourOnlyMoveIsHUSTLE/budok/config.json` |
+| Linux | `~/.local/share/YourOnlyMoveIsHUSTLE/budok/config.json` |
+
+Every setting below can be edited in game, under **main menu → Mod List → budok** (or the F8 overlay).
 
 ## mcp
 
@@ -60,5 +66,5 @@ OpenAI-compatible server (default Ollama, `http://127.0.0.1:11434/v1`).
 | `schemas.registry_enabled` / `registry_url` | `false` / `""` | Opt-in community registry (HTTPS). Files are looked up as `<url>/<fingerprint>.json`. |
 | `source_access.enabled` / `max_file_bytes` | `true` / `200000` | Read-only `res://` access for bots. |
 | `automation.script` | `""` | GDScript with `func run(runtime)` started after boot. |
-| `ui.toggle_key` / `show_on_start` | `F8` / `false` | Panel toggle. |
+| `ui.show_button` / `toggle_key` / `show_on_start` | `true` / `F8` / `false` | Corner button, overlay key, open on start. |
 | `logging.match_logs` | `true` | Write `user://budok/matches/<time>_<p1>_vs_<p2>.json` after each match. |

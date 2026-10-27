@@ -182,7 +182,7 @@ static func coerce(spec: Dictionary, value, control = null) -> Dictionary:
 		"opaque":
 			var default_value = spec.get("default")
 			if default_value != null and typeof(_ints(value)) != typeof(default_value):
-				return _err("expected a value shaped like %s" % Util.to_json(default_value))
+				return _err("expected a value shaped like %s" % Util.json_str(default_value))
 			return {"ok": true, "value": _ints(value)}
 	return _err("unsupported payload kind %s" % kind)
 

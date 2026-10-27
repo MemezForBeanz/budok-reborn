@@ -117,7 +117,7 @@ func _take_turn(slot: String, token: String) -> void:
 						_remember(slot, view["tick"], str(input.get("action", "")), str(input.get("note", reply.get("text", ""))))
 				_:
 					output = {"ok": false, "error": "unknown tool"}
-			results.append({"id": tool_call["id"], "content": Util.to_json(output), "is_error": not output.get("ok", true)})
+			results.append({"id": tool_call["id"], "content": Util.json_str(output), "is_error": not output.get("ok", true)})
 		if submitted:
 			break
 		messages += llm.tool_results("play", results)
@@ -135,9 +135,9 @@ func _take_turn(slot: String, token: String) -> void:
 func _turn_prompt(slot: String, view: Dictionary, max_sims: int) -> String:
 	var parts = [
 		"Tick %d. %s" % [view["tick"], view["situation"]],
-		"Observation: " + Util.to_json(view["observation"]),
-		"Legal actions: " + Util.to_json(view["legal_actions"]),
-		"Extras: " + Util.to_json(view["extras"]),
+		"Observation: " + Util.json_str(view["observation"]),
+		"Legal actions: " + Util.json_str(view["legal_actions"]),
+		"Extras: " + Util.json_str(view["extras"]),
 	]
 	if not _notes[slot].empty():
 		parts.append("Your recent notes: " + PoolStringArray(_notes[slot]).join(" | "))

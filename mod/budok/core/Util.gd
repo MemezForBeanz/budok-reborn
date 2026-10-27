@@ -85,11 +85,11 @@ static func random_hex(byte_count: int = 16) -> String:
 	return crypto.generate_random_bytes(byte_count).hex_encode()
 
 
-static func to_json(value, sorted: bool = false, indent: String = "") -> String:
+static func json_str(value, sorted: bool = false, indent: String = "") -> String:
 	return JSON.print(value, indent, sorted)
 
 
-static func parse_json(text: String) -> Dictionary:
+static func json_parse(text: String) -> Dictionary:
 	var result = JSON.parse(text)
 	if result.error != OK:
 		return {"ok": false, "error": "%s at line %d" % [result.error_string, result.error_line]}
@@ -136,12 +136,12 @@ static func read_json(path: String):
 	var text = read_text(path)
 	if text == null:
 		return null
-	var parsed = parse_json(text)
+	var parsed = json_parse(text)
 	return parsed.get("value") if parsed["ok"] else null
 
 
 static func write_json(path: String, value) -> bool:
-	return write_text(path, to_json(value, true, "  "))
+	return write_text(path, json_str(value, true, "  "))
 
 
 static func deep_merge(base: Dictionary, override: Dictionary) -> Dictionary:
@@ -156,7 +156,7 @@ static func deep_merge(base: Dictionary, override: Dictionary) -> Dictionary:
 	return result
 
 
-static func get_path(data: Dictionary, path: String, default_value = null):
+static func dig(data: Dictionary, path: String, default_value = null):
 	var node = data
 	for part in path.split("."):
 		if not (node is Dictionary) or not node.has(part):
@@ -165,7 +165,7 @@ static func get_path(data: Dictionary, path: String, default_value = null):
 	return node
 
 
-static func set_path(data: Dictionary, path: String, value) -> void:
+static func plant(data: Dictionary, path: String, value) -> void:
 	var parts = path.split(".")
 	var node = data
 	for i in range(parts.size() - 1):

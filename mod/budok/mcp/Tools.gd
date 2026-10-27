@@ -9,6 +9,7 @@ const Util = preload("res://budok/core/Util.gd")
 const MatchStarter = preload("res://budok/core/MatchStarter.gd")
 const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", "ai.annotate."]
 const SETTING_BLOCKLIST := ["api_key", "base_url", "auth_token"]
+const SESSION_TAKEOVER_MS := 120000
 
 var runtime = null
 var _defs := []
@@ -52,7 +53,8 @@ func _define() -> void:
 		["p1", "p2"])
 	_add("set_controller", "Set controller", "Change who controls a slot right now: human, mcp or ai (the in-game API-key autopilot).",
 		{"slot": slot, "controller": {"type": "string", "enum": ["human", "mcp", "ai"]}}, ["slot", "controller"])
-	_add("claim_slot", "Claim slot", "Take control of a slot for this MCP session (sets its controller to mcp).", {"slot": slot}, ["slot"])
+	_add("claim_slot", "Claim slot", "Take control of a slot for this MCP session (sets its controller to mcp). A slot held by a disconnected or idle (2 min) session is taken over automatically; force takes it from a live one.",
+		{"slot": slot, "force": {"type": "boolean"}}, ["slot"])
 	_add("release_slot", "Release slot", "Give a claimed slot back (the human can play it again).", {"slot": slot}, ["slot"])
 	_add("wait_for_turn", "Wait for turn", "Long-poll until your slot must choose a move. Returns the turn token, a plain-language situation, the observation and legal actions. Returns status 'waiting' after timeout_s: just call again.",
 		{"slot": slot, "timeout_s": {"type": "number", "minimum": 1, "maximum": 50, "description": "Default 20."},
@@ -152,7 +154,9 @@ func _t_start_match(args: Dictionary, sid: String):
 	if result.get("ok", false) and claim != "none":
 		for slot in ["p1", "p2"]:
 			if runtime.matches.controllers[slot] == "mcp" and (claim == "" or claim == slot or claim == "both"):
-				runtime.matches.claim(slot, sid)
+				# Starting a match is explicit: take the requested slots even
+				# from another session.
+				runtime.matches.claim(slot, sid, true)
 		result["your_slots"] = runtime.matches.slots_of(sid)
 		result["next"] = "call wait_for_turn"
 	return result
@@ -163,7 +167,9 @@ func _t_set_controller(args: Dictionary, _sid: String) -> Dictionary:
 
 
 func _t_claim_slot(args: Dictionary, sid: String) -> Dictionary:
-	return runtime.matches.claim(str(args.get("slot", "")), sid)
+	var slot = str(args.get("slot", ""))
+	var force = bool(args.get("force", false)) or _owner_gone(runtime.matches.owners.get(slot, ""), sid)
+	return runtime.matches.claim(slot, sid, force)
 
 
 func _t_release_slot(args: Dictionary, sid: String) -> Dictionary:
@@ -259,7 +265,7 @@ func _t_submit_character_schema(args: Dictionary, sid: String) -> Dictionary:
 	if entry.has("error"):
 		return entry
 	var session = runtime.mcp.sessions.get(sid, {})
-	var provenance = {"by": "mcp", "client": session.get("client", {}).get("name", "unknown"), "at": OS.get_datetime_string_from_system()}
+	var provenance = {"by": "mcp", "client": session.get("client", {}).get("name", "unknown"), "at": Time.get_datetime_string_from_system()}
 	return runtime.schemas.submit(entry, args.get("schema"), provenance, bool(args.get("replace", false)), bool(args.get("override", false)))
 
 
@@ -354,12 +360,24 @@ func _slot(args: Dictionary, sid: String, must_control: bool = true) -> Dictiona
 		return {"slot": slot}
 	if matches.owners[slot] == sid:
 		return {"slot": slot}
+	if matches.owners[slot] != "" and _owner_gone(matches.owners[slot], sid):
+		matches.claim(slot, sid, true)
+		return {"slot": slot}
 	if matches.owners[slot] != "":
-		return {"ok": false, "error": "%s is controlled by another MCP session" % slot}
+		return {"ok": false, "error": "%s is controlled by another active MCP session; claim_slot with force=true to take it" % slot}
 	if matches.controllers[slot] != "mcp":
 		return {"ok": false, "error": "%s is controlled by '%s'; call claim_slot to take it over" % [slot, matches.controllers[slot]]}
 	matches.claim(slot, sid)
 	return {"slot": slot}
+
+
+# A slot owner that ended its session or has not called anything for a while
+# (a chatbot app restarted, so it reconnects with a new session id).
+func _owner_gone(owner_sid: String, sid: String) -> bool:
+	if owner_sid == "" or owner_sid == sid:
+		return false
+	var owner = runtime.mcp.sessions.get(owner_sid)
+	return owner == null or Util.now_ms() - int(owner.get("last_seen_ms", 0)) > SESSION_TAKEOVER_MS
 
 
 func _entry(args: Dictionary) -> Dictionary:

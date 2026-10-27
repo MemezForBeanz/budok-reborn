@@ -45,7 +45,7 @@ func chat(role: String, system: String, messages: Array, tools: Array) -> Dictio
 	var request = _anthropic_request(cfg, key, system, messages, tools) if provider == "anthropic" else _openai_request(provider, cfg, key, system, messages, tools)
 	var response = {}
 	for attempt in range(MAX_ATTEMPTS):
-		response = yield(_send(request["url"], request["headers"], Util.to_json(request["body"]), float(cfg.get("request_timeout_s", 180))), "completed")
+		response = yield(_send(request["url"], request["headers"], Util.json_str(request["body"]), float(cfg.get("request_timeout_s", 180))), "completed")
 		if response["ok"] or not (int(response.get("status", 0)) in RETRY_CODES) or attempt == MAX_ATTEMPTS - 1:
 			break
 		yield(get_tree().create_timer(2.0 * pow(2, attempt)), "timeout")
@@ -87,8 +87,8 @@ func _anthropic_request(cfg: Dictionary, key: String, system: String, messages: 
 	}
 	if not tools.empty():
 		var defs = []
-		for tool in tools:
-			defs.append({"name": tool["name"], "description": tool["description"], "input_schema": tool["parameters"]})
+		for tool_def in tools:
+			defs.append({"name": tool_def["name"], "description": tool_def["description"], "input_schema": tool_def["parameters"]})
 		body["tools"] = defs
 		body["tool_choice"] = {"type": "auto"}
 	var effort = str(cfg.get("effort", ""))
@@ -113,8 +113,8 @@ func _openai_request(provider: String, cfg: Dictionary, key: String, system: Str
 		body["temperature"] = float(cfg["temperature"])
 	if not tools.empty():
 		var defs = []
-		for tool in tools:
-			defs.append({"type": "function", "function": {"name": tool["name"], "description": tool["description"], "parameters": tool["parameters"]}})
+		for tool_def in tools:
+			defs.append({"type": "function", "function": {"name": tool_def["name"], "description": tool_def["description"], "parameters": tool_def["parameters"]}})
 		body["tools"] = defs
 		body["tool_choice"] = "auto"
 	var headers = ["content-type: application/json"]
@@ -165,7 +165,7 @@ func _parse_anthropic(json) -> Dictionary:
 
 func _parse_openai(json) -> Dictionary:
 	if not (json is Dictionary) or not (json.get("choices") is Array) or json["choices"].empty():
-		return {"ok": false, "error": "unexpected response: %s" % Util.truncate(Util.to_json(json), 300)}
+		return {"ok": false, "error": "unexpected response: %s" % Util.truncate(Util.json_str(json), 300)}
 	var choice = json["choices"][0]
 	var message = choice.get("message", {})
 	var calls = []
@@ -173,7 +173,7 @@ func _parse_openai(json) -> Dictionary:
 	if raw_calls is Array:
 		for call_info in raw_calls:
 			var fn = call_info.get("function", {})
-			var parsed = Util.parse_json(str(fn.get("arguments", "{}")))
+			var parsed = Util.json_parse(str(fn.get("arguments", "{}")))
 			calls.append({"id": call_info.get("id"), "name": fn.get("name"), "input": parsed["value"] if parsed["ok"] else {"_unparsed": fn.get("arguments")}})
 	var assistant = {"role": "assistant", "content": message.get("content")}
 	if raw_calls is Array and not raw_calls.empty():
@@ -213,7 +213,7 @@ func _send(url: String, headers: Array, body: String, timeout_s: float, method: 
 	var text = completed[3].get_string_from_utf8()
 	if result != HTTPRequest.RESULT_SUCCESS:
 		return {"ok": false, "status": 0, "error": "network error %d talking to %s (timeout, DNS or TLS)" % [result, url]}
-	var parsed = Util.parse_json(text)
+	var parsed = Util.json_parse(text)
 	if status >= 400:
 		var message = Util.truncate(text, 400)
 		if parsed["ok"] and parsed["value"] is Dictionary:

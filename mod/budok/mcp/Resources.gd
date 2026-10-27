@@ -53,7 +53,7 @@ func read(uri: String) -> Dictionary:
 	if uri == "yomi://schema/format":
 		return _contents(uri, "application/json", str(Util.read_text(FORMAT_PATH)))
 	if uri == "yomi://match/log":
-		return _contents(uri, "application/json", Util.to_json(runtime.matches.match_log(50)))
+		return _contents(uri, "application/json", Util.json_str(runtime.matches.match_log(50)))
 	if uri.begins_with("yomi://characters/"):
 		var rest = uri.substr("yomi://characters/".length()).split("/")
 		if rest.size() != 2:
@@ -65,8 +65,8 @@ func read(uri: String) -> Dictionary:
 		if not loaded["ok"]:
 			return {"ok": false, "error": loaded["error"]}
 		if rest[1] == "skeleton":
-			return _contents(uri, "application/json", Util.to_json(runtime.schemas.describe(entry)["skeleton"]))
-		return _contents(uri, "application/json", Util.to_json(runtime.describe_character(entry, [])))
+			return _contents(uri, "application/json", Util.json_str(runtime.schemas.describe(entry)["skeleton"]))
+		return _contents(uri, "application/json", Util.json_str(runtime.describe_character(entry, [])))
 	return {"ok": false, "error": "unknown resource %s" % uri}
 
 

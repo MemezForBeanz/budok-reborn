@@ -101,7 +101,8 @@ class BudokClient:
             text = "".join(block.get("text", "") for block in result.get("content", []) if block.get("type") == "text")
             payload = json.loads(text) if text else {}
         if result.get("isError"):
-            raise McpError(f"{name}: {payload.get('error') or payload}")
+            detail = payload.get("message")
+            raise McpError(f"{name}: {payload.get('error') or payload}" + (f" ({detail})" if detail else ""))
         return payload
 
     def close(self) -> None:
