@@ -25,9 +25,9 @@ You must own the game. Everything runs locally. Online and lobby matches are nev
 2. Put the zip in the game's `mods/` folder (next to the game executable; create it if needed). Leave it
    zipped.
 3. Start the game. All settings live in the game's own mod settings: **main menu → Mod List → budok**
-   (tabs Connect, Players, AI, Providers, Characters, Advanced). The same tabs are also on the F8
-   overlay and the small **budok** button in the top-right corner, which you can turn off under
-   Advanced.
+   (tabs Connect, Players, AI, Providers, Characters, Advanced). The same tabs open from **Options →
+   budok settings** (also in the pause menu during a match), the F8 key and the small **budok** button in
+   the top-right corner, which you can turn off under Advanced.
 4. Optional check: `python connectors/python/selftest.py --token <token>` plays a short match through
    MCP (both sides random moves, a few simulations) and reports problems.
 

@@ -53,10 +53,25 @@ func _run() -> void:
 	var main = Control.new()
 	main.name = "Main"
 	main.add_child(menu)
+	# Stand-in for the game's Options window: a column of toggles ending in Back.
+	var options = PanelContainer.new()
+	options.name = "OptionsContainer"
+	var column = VBoxContainer.new()
+	for toggle_name in ["FullscreenButton", "MusicButton", "OptionsBackButton"]:
+		var toggle = Button.new() if toggle_name == "OptionsBackButton" else CheckButton.new()
+		toggle.name = toggle_name
+		column.add_child(toggle)
+	options.add_child(column)
+	main.add_child(options)
 	root.add_child(main)
 	yield(create_timer(2.5), "timeout")
 	var runtime = _mod.runtime
 	check(runtime.mod_menu.attached(), "settings attached to the Mod List entry")
+	var options_button = column.get_node_or_null("BudokSettingsButton")
+	check(options_button != null and options_button.get_index() == column.get_node("OptionsBackButton").get_index() - 1, "budok button sits above Back in the Options window")
+	options_button.emit_signal("pressed")
+	check(runtime.panel._root.visible and not options.visible, "Options button opens the budok overlay")
+	runtime.panel.toggle()
 	var titles = []
 	for i in range(budok_tabs.get_tab_count()):
 		titles.append(budok_tabs.get_tab_title(i))

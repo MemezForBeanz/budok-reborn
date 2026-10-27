@@ -1,7 +1,8 @@
 extends CanvasLayer
 
 # F8 overlay with the same settings tabs as the game's Mod List entry
-# (ui/SettingsView.gd), plus a small corner button to open it.
+# (ui/SettingsView.gd), plus a small corner button to open it. The game's
+# Options window also opens it (ui/OptionsHook.gd).
 
 const Util = preload("res://budok/core/Util.gd")
 const SettingsView = preload("res://budok/ui/SettingsView.gd")
@@ -59,6 +60,11 @@ func toggle() -> void:
 	_root.visible = not _root.visible
 	if _root.visible:
 		view.refresh()
+
+
+func open() -> void:
+	if not _root.visible:
+		toggle()
 
 
 func _on_status_changed() -> void:

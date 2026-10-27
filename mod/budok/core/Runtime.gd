@@ -22,6 +22,7 @@ const AutoPilot = preload("res://budok/ai/AutoPilot.gd")
 const Annotator = preload("res://budok/ai/Annotator.gd")
 const OverlayPanel = preload("res://budok/ui/Panel.gd")
 const ModMenuHook = preload("res://budok/ui/ModMenuHook.gd")
+const OptionsHook = preload("res://budok/ui/OptionsHook.gd")
 const Automation = preload("res://budok/automation/Automation.gd")
 const METADATA_PATH := "res://budok/_metadata"
 const BRIDGE_SOURCE := "res://budok/tools/budok_stdio.py"
@@ -41,6 +42,7 @@ var autopilot = null
 var annotator = null
 var panel = null
 var mod_menu = null
+var options_menu = null
 var automation = null
 var server_state := {}
 var bridge_path := ""
@@ -73,6 +75,8 @@ func _ready() -> void:
 	panel.setup(self)
 	mod_menu = _add(ModMenuHook.new(), "ModMenuHook")
 	mod_menu.setup(self)
+	options_menu = _add(OptionsHook.new(), "OptionsHook")
+	options_menu.setup(self)
 	automation = _add(Automation.new(), "Automation")
 	automation.setup(self)
 	matches.connect("match_started", self, "_on_match_changed")
