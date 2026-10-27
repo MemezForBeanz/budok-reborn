@@ -1,0 +1,8 @@
+# budok calls the game's own underscore methods (main._on_match_ready, ...) on purpose.
+disable:
+  - private-method-call
+max-line-length: 260
+max-file-lines: 1200
+function-arguments-number: 8
+max-public-methods: 60
+max-returns: 25

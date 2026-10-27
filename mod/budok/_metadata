@@ -1,0 +1,12 @@
+{
+  "name": "budok",
+  "friendly_name": "budok - AI & MCP bridge",
+  "description": "Lets chatbot apps (via MCP) or API-key LLMs play YOMI Hustle, with automatic schemas for vanilla and modded characters.",
+  "author": "budok",
+  "version": "1.0.0",
+  "link": "https://github.com/memezforbeanz/budok-reborn",
+  "id": "budok",
+  "overwrites": false,
+  "requires": [""],
+  "priority": 0
+}

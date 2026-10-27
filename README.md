@@ -1,171 +1,104 @@
-# budok-ai
+# budok
 
-LLMs can fight! Here's Sonnet vs. Opus:
+LLMs can fight! Here's Sonnet vs. Opus from the original project:
 
 https://github.com/user-attachments/assets/5e855a46-f6a0-48f7-b811-9c26b8d8a907
 
-budok-ai allows LLMs to play a 2d fighting game against each other by modding the brilliant [YOMI Hustle](https://store.steampowered.com/app/2212330/Your_Only_Move_Is_HUSTLE/). YOMI Hustle is a turn-based, frame-by-frame, simultaneous resolution fighting game. It's like the chess of rock-paper-scissors. The magic trick is, we can replay completed matches to simulate LLMs competing in a fast-twitch game.
+**budok** is a native mod for [YOMI Hustle](https://store.steampowered.com/app/2212330/Your_Only_Move_Is_HUSTLE/),
+a turn-based, simultaneous-move fighting game. It lets AI play the game inside your normal Steam install:
 
-budok-ai consists of a YOMI Hustle mod in gdscript and a python daemon for coordinating LLM responses. We run the modded game in Steam within a linux vm. You must own the game on Steam for this to work (and everyone should buy the game even if not playing with LLMs - watch this YouTube video for an intro: [The Greatest Fighting Game You've Never Heard Of
-](https://www.youtube.com/watch?v=tVWtyXQhdHQ)).
+- **Chatbot apps over MCP.** The mod runs an MCP server inside the game, so Claude Desktop, Claude Code
+  and other MCP clients can start matches, see the situation, **simulate moves on the real engine** and
+  lock in decisions. Play against your chatbot, or let two bots fight.
+- **API-key mode ("token mode").** Paste an Anthropic, OpenAI, OpenRouter or local-model key and the mod
+  plays a slot by itself. Move making and schema writing each have their own model and behaviour settings.
+- **Every character.** That includes vanilla characters, characters added in newer builds, and **modded
+  characters** loaded through the character loader. budok measures each character's moves straight from
+  its scene (frame data, reach, meter costs, payloads, custom resources and extras). An LLM, or the mod
+  author, only adds the meaning of each move.
 
-## Setup
+You must own the game. Everything runs locally. Online and lobby matches are never controlled.
 
-Only tested on MacOS. The game runs headlessly in a Linux VM via OrbStack. 
+## Install
 
-### Prerequisites
+1. Build `budok.zip` with `python scripts/package_mod.py` (it lands in `dist/`).
+2. Put the zip in the game's `mods/` folder (next to the game executable; create it if needed). Leave it
+   zipped.
+3. Start the game. A **budok** button appears in the top-right corner; F8 toggles the panel.
 
-- [YOMI Hustle](https://store.steampowered.com/app/2212330/Your_Only_Move_Is_HUSTLE/) on Steam (you must own the game)
-- A Steam account with Steam Guard enabled (needed for downloading game files)
-- An API key from [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), or [OpenRouter](https://openrouter.ai/) (for LLM-backed policies)
+## Connect a chatbot (MCP)
 
-### Step-by-step
+The panel's **Connect** tab shows the server URL (default `http://127.0.0.1:8765/mcp`) and a secret token,
+with copy buttons for ready-made configs:
 
-1. **Install system dependencies:**
-   ```bash
-   brew install uv
-   brew install --cask orbstack
-   brew tap steamre/tools
-   brew install depotdownloader
-   ```
-   Open OrbStack once after install to finish its setup.
+- **Claude Code**: `claude mcp add --transport http budok http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"`
+- **Claude Desktop** (and other clients that only start stdio servers): use the copied
+  `claude_desktop_config.json` snippet. It runs `npx mcp-remote` and needs Node.js.
+- **Any other MCP client**: Streamable HTTP at the URL. Send `Authorization: Bearer <token>`, or add
+  `?token=<token>` for clients that can't set headers.
+- **Web chatbots** (claude.ai connectors, ChatGPT) need a public HTTPS URL. Run a tunnel such as
+  `cloudflared tunnel --url http://127.0.0.1:8765` and use `https://<tunnel>/mcp?token=<token>`. Anyone
+  with that URL and token can control your game, so close the tunnel when done.
 
-2. **Clone the repo and install Python dependencies:**
-   ```bash
-   git clone https://github.com/nickslevine/budok-ai.git
-   cd budok-ai
-   uv sync --project daemon
-   ```
+Then ask your chatbot something like *"Start a match, I'm Ninja on P1, you play Cowboy on P2."* It will
+call `start_match`, loop `wait_for_turn` → `simulate` → `submit_action`, and you play P1 with the normal
+game UI. The `play_match` MCP prompt gives it the rules and both characters' notes. See
+[docs/mcp.md](docs/mcp.md) for every tool.
 
-3. **Set up API keys:**
-   ```bash
-   cp .env.example .env
-   # Edit .env and uncomment/fill your API key(s)
-   ```
+## Let the mod play by itself (token mode)
 
-4. **Create an x86-64 Ubuntu VM in OrbStack:**
-   In OrbStack, create a new Linux machine: Ubuntu Jammy (22.04), architecture **amd64**. Default name `ubuntu` is fine.
-   ```bash
-   orb run -m ubuntu uname -m   # should print "x86_64"
-   ```
+In the panel's **AI** tab:
 
-5. **Install VM dependencies:**
-   ```bash
-   orb run -m ubuntu bash -c "\
-     sudo apt-get update -qq && \
-     sudo apt-get install -y \
-       xvfb libgl1 mesa-utils unzip scrot ffmpeg \
-       libx11-6 libxcursor1 libxinerama1 libxrandr2 libxi6 \
-       libgles2-mesa libegl1-mesa libgl1-mesa-dri \
-       libpulse0 libasound2"
-   ```
+- **Move making**: provider, model, effort, tool steps, simulations per turn, play style and risk.
+- **Schema creation**: a separate provider and model for writing notes on modded characters (a strong
+  model is worth it, since this runs once per character).
+- API keys for Anthropic, OpenAI and OpenRouter (stored in `user://budok/config.json`, or read from the
+  usual environment variables), plus the URL of a local OpenAI-compatible server (Ollama, LM Studio).
 
-6. **Download the game via DepotDownloader:**
-   ```bash
-   mkdir -p ~/yomi-steam
-   depotdownloader -app 2212330 -depot 2232859 -username YOUR_STEAM_USERNAME -dir ~/yomi-steam
-   ```
-   This prompts for your password and Steam Guard code. If macOS blocks it, run:
-   ```bash
-   xattr -d com.apple.quarantine /opt/homebrew/bin/depotdownloader
-   ```
+Then set a slot to `ai` in the **Players** tab, or start a match with `controllers: {"p2": "ai"}`. Each
+turn the model gets the situation, can simulate candidate moves and must submit one. Turn timeouts fall
+back to a safe move. All settings: [docs/settings.md](docs/settings.md).
 
-7. **Copy game files into the VM:**
-   ```bash
-   orb run -m ubuntu mkdir -p /home/$USER/games/yomi
-   for f in ~/yomi-steam/*; do [ -f "$f" ] && orb push -m ubuntu "$f" /home/$USER/games/yomi/; done
-   orb run -m ubuntu chmod +x /home/$USER/games/yomi/YourOnlyMoveIsHUSTLE.x86_64
-   ```
+## Modded characters
 
-8. **Create your match config:**
-   ```bash
-   cp match.conf.example match.conf
-   ```
-   The defaults work out of the box. Edit `match.conf` if your VM name or game path differs.
+Modded characters work out of the box: budok lists them, loads them on demand and reads their moves from
+the scene. To give bots real understanding, each character also gets **notes** (what each move is for,
+what it beats, when to use it):
 
-9. **Verify everything works:**
-   ```bash
-   uv run --project daemon pytest   # all tests should pass
-   ```
+1. **Shipped by the mod**: if the character's mod contains a budok schema, it is used directly, with no
+   generation. Mod authors can put `<Character>.budok.json` next to the character scene. See
+   [docs/modded-characters.md](docs/modded-characters.md).
+2. **Generated by your chatbot**: ask it to run the `annotate_character` prompt. It reads the measured
+   skeleton and the character's code (`introspect_character`, `read_source`) and saves notes with
+   `submit_character_schema`.
+3. **Generated in token mode**: the **Characters** tab → *Generate with AI* (or enable auto-generation).
+4. **Community registry** (opt-in): fetch notes other players published for the exact same character build.
 
-See [docs/macos.md](docs/macos.md) for detailed troubleshooting and advanced configuration.
+Vanilla characters ship with curated notes. Bots also get a knowledge pack about the engine and modding
+conventions (MCP resources `yomi://knowledge/...`) and read-only access to game and mod scripts.
 
-## Running a Match
+`mod/budok_test_char` is a small test character mod (Ninja-based, with a custom resource, a code-driven
+move with a charge payload, and a custom extra toggle). Use it to try the modded-character flow without
+art: `python scripts/package_mod.py --test-char`.
 
-1. **Run a match:**
-   ```bash
-   scripts/run_match.sh
-   ```
-   This single command handles everything: mod packaging, VM setup, daemon startup, game launch, match execution, and replay recording.
+## Automation
 
-   To monitor the match live in a TUI:
-   ```bash
-   uv run --project daemon yomi-tui
-   ```
-   This will show match stats and stream LLM reasoning traces and decisions. 
+- **GDScript**: point `automation.script` at a script with `func run(runtime)`. It gets the same API the
+  MCP tools use. Example: `mod/budok/automation/examples/series.gd` (AI vs AI series).
+- **Python / anything else**: drive the MCP server. `connectors/python/budok_connector.py` is a
+  dependency-free client with `status`, `characters`, `tool ...` and `series` commands.
 
-2. **Wait for the match to complete.** The script polls automatically and prints results when done. A typical LLM v LLM match (750 HP) takes 10-15 minutes.
+See [docs/automation.md](docs/automation.md).
 
-3. **View the results.** When the match finishes you'll see a summary like:
-   ```
-   ╔══════════════════════════════════╗
-   ║         MATCH RESULT             ║
-   ╠══════════════════════════════════╣
-   ║  Status:  completed              ║
-   ║  Winner:  p2                     ║
-   ║  Reason:  ko                     ║
-   ║  Turns:   150                    ║
-   ╚══════════════════════════════════╝
-   ```
-   Artifacts (decisions, prompts, metrics, replay video) are saved to `runs/<timestamp>_<match_id>/`.
-
-4. **Watch the replay:** Open `runs/<match>/replay.mp4` to see the fight. The video will appear ~90 seconds after the match finishes, since the replay needs to play in real time for recording. 
-
-### Common options
+## Development
 
 ```bash
-# Use a specific daemon config
-scripts/run_match.sh --daemon-config daemon/config/llm_v_llm.json
-
-# Skip mod packaging (faster iteration, reuses mod already in VM)
-scripts/run_match.sh --skip-mod-push
-
-# Disable replay recording
-scripts/run_match.sh --no-replay
-
-# Preview what would happen without executing
-scripts/run_match.sh --dry-run
+uv sync                      # dev tools: pytest, jsonschema, ruff
+uv run pytest                # data, consistency, GDScript syntax (needs gdtoolkit 3.x), connector, packaging
+godot --no-window --path mod -s res://tests/run_tests.gd   # GDScript unit tests (Godot 3.5)
+python scripts/package_mod.py --test-char --install "<game>/mods"
 ```
 
-### Configuring policies
-
-Edit `daemon/config/llm_v_llm.json` to change which models fight. The `policy_mapping` assigns policies to P1 and P2:
-
-```json
-{
-  "policy_mapping": {
-    "p1": "anthropic/claude-sonnet",
-    "p2": "anthropic/claude-opus"
-  }
-}
-```
-
-Available providers: `anthropic`, `openai`, `openrouter`. Baselines (`baseline/random`, `baseline/block_always`, `baseline/greedy_damage`, `baseline/scripted_safe`) need no API key.
-
-Characters: set `character_selection.mode` to `llm_choice` (LLMs pick), `mirror` (random, same for both), `assigned` (you pick), or `random_from_pool`. Available characters: Ninja, Cowboy, Wizard, Robot, Mutant.
-
-## Repository layout
-
-- `daemon/`: Python package, local tooling, and daemon-side implementation.
-- `docs/`: architecture, data flow, operations, protocol, game-internals, and prompt-engineering notes.
-- `mod/`: Godot mod sources under `mod/YomiLLMBridge/`.
-- `prompts/`: versioned prompt templates used by daemon adapters.
-- `schemas/`: versioned JSON schemas for the IPC protocol.
-- `scripts/`: local helper scripts for schema checks, decompilation, and orchestration.
-- `runs/`: per-match artifacts
-- `tests/`: reusable fixtures plus repository-level tests.
-
-## Next Steps
-- Model vs. model tournaments and benchmarking
-- RL experiments
-- Centaur battles where humans compete to write the best prompts.
+Layout: `mod/budok/` (the mod: `core/` game adapter, `mcp/` server, `ai/` token mode, `ui/`,
+`knowledge/`, `schemas/`), `mod/budok_test_char/`, `connectors/python/`, `docs/`, `tests/`.
+Architecture notes: [docs/architecture.md](docs/architecture.md).

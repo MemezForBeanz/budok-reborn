@@ -1,17 +1,14 @@
-; Minimal Godot 3.5 project used for bridge smoke tests and script validation.
+; Minimal Godot 3.5 project whose res:// is this mod/ folder, so res://budok/...
+; resolves without the game. Used for the headless unit tests:
+;   godot --no-window --path mod -s res://tests/run_tests.gd
 
 config_version=4
 
 [application]
 
-config/name="YomiAI Mod Smoke"
+config/name="budok tests"
 run/main_scene=""
 boot_splash/show_image=false
-
-[display]
-
-window/size/width=1280
-window/size/height=720
 
 [rendering]
 

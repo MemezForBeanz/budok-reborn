@@ -1,131 +1,53 @@
 # Architecture
 
-This document covers daemon and mod runtime architecture. The normative source remains [the unified spec](../specs/unified_spec.md).
+Everything runs inside the game process. The mod is loaded by the game's mod loader (`ModMain.gd`, a
+child of the `ModLoader` autoload, so it survives scene changes) and creates `core/Runtime.gd`, which
+wires the services below. Game objects are only ever touched by duck typing and runtime autoload lookups.
+A renamed class or singleton in a future build therefore breaks one feature, not the whole mod.
 
-## Ownership Boundaries
+```
+YOMI Hustle process
+└─ budok (ModMain → Runtime)
+   ├─ core/MatchController  watches Global.current_game; opens a turn per player the game waits on
+   │    ├─ ActionCatalog     legal moves + payload/extras from the player's native ActionButtons panel;
+   │    │                    applies via ActionButtons.on_action_submitted (the Lock In path)
+   │    ├─ Observation       per-player snapshot + plain-language situation
+   │    └─ Simulator         what-if previews: fresh Game (ghost) + copy_to + tick, in a hidden viewport
+   ├─ core/Roster           Global.name_paths + character loader registry (lazy loading of mods)
+   ├─ core/Introspector     measured skeleton from the character scene (states, hitboxes, resources)
+   ├─ core/SchemaStore      notes lookup (override → mod-shipped → bundled → generated → registry),
+   │                        validation and merging
+   ├─ core/SourceBrowser    read-only res:// access
+   ├─ mcp/HttpServer        TCP_Server-based HTTP/1.1, polled on the main thread, deferred responses
+   ├─ mcp/McpServer         JSON-RPC, sessions, auth, origin checks; mcp/Tools + mcp/Resources
+   ├─ ai/LlmClient          Anthropic Messages API / OpenAI-compatible chat via HTTPRequest
+   ├─ ai/AutoPilot          token mode player (controller "ai")
+   ├─ ai/Annotator          token mode schema writer
+   ├─ ui/Panel              F8 panel
+   └─ automation/Automation optional user GDScript
+```
 
-- `daemon/src/yomi_daemon/` owns orchestration, protocol handling, adapters, storage, and tournament operations.
-- `mod/YomiLLMBridge/` owns live game integration and mod-side safety checks.
-- `schemas/` owns the versioned transport contract.
+## Turn lifecycle
 
-## Daemon Module Map
+1. The game pauses and activates both move panels. When a panel is active and its fighter is
+   `state_interruptable`, budok waits about 3 frames for the panel to settle. It then snapshots the legal
+   catalog and opens a turn with a random token.
+2. The slot's controller decides:
+   - `human` does nothing.
+   - `mcp` answers `wait_for_turn` / `submit_action`.
+   - `ai` triggers the autopilot.
+3. `submit` re-validates against the snapshot: the action must be legal and `is_usable()` (an unusable
+   action would turn into a forfeit), and the payload and extras must be valid. It then calls
+   `on_action_submitted` with exactly the values the UI would produce.
+4. When the panel deactivates, the turn closes. The next decision point records the history entry from
+   `ReplayManager.frames`, so the opponent's move is revealed only after it resolved. Undo truncates history.
 
-| Module | Responsibility |
-|---|---|
-| `cli.py` | CLI entry point and argument parsing |
-| `config.py` | Runtime config loading, validation, and precedence resolution |
-| `server.py` | WebSocket server, handshake, and message routing |
-| `orchestrator.py` | Match orchestration and turn lifecycle coordination |
-| `match.py` | Match metadata and state tracking |
-| `protocol.py` | Typed protocol models, enums, envelope contract, canonical hashing |
-| `validation.py` | Schema validation and decision legality checks |
-| `prompt.py` | Deterministic prompt rendering from templates |
-| `response_parser.py` | Multi-format response parsing (structured, JSON, text) with correction retry |
-| `fallback.py` | Fallback action selection for timeouts and invalid responses |
-| `manifest.py` | Match manifest construction for reproducibility |
-| `ids.py` | Deterministic ID and seed generation |
-| `redact.py` | API key pattern redaction for logs and artifacts |
-| `tooling.py` | `uv` environment verification entry point |
-| `adapters/` | Provider and baseline policy adapters |
-| `storage/` | Artifact writing and replay index construction |
-| `logging/` | Structured logging schemas |
-| `replay_capture.py` | FFmpeg-based replay video recording via OrbStack VM |
-| `tournament/` | Round-robin scheduling, match execution, Elo ratings, reporting |
+## Fairness and safety
 
-## Adapter Registry
-
-`adapters/base.py` defines the `PolicyAdapter` protocol and `build_policy_registry()` which maps provider names to adapter constructors. Implemented adapters:
-
-- `baseline.py` — four deterministic baselines (`random`, `block_always`, `greedy_damage`, `scripted_safe`)
-- `anthropic.py` — Anthropic Claude models
-- `openai.py` — OpenAI models
-- `openrouter.py` — OpenRouter-proxied models
-
-Placeholder stubs exist for `google`, `local`, and `ollama` but are not registered.
-
-## Storage And Artifacts
-
-`storage/writer.py` writes per-match artifacts to `runs/<timestamp>_<match_id>/`. `storage/replay_index.py` builds per-turn pointers into decisions and prompts for replay analysis.
-
-## Tournament Subsystem
-
-`tournament/` provides:
-
-- `scheduler.py` — round-robin pairing generation with mirror-match and side-swap support
-- `runner.py` — concurrent match execution against the daemon server
-- `ratings.py` — Elo rating table computation from match results
-- `reporter.py` — human-readable tournament report generation
-- `cli.py` — `yomi-tournament` CLI with `schedule`, `report`, and `recompute` subcommands
-
-## Mod Bridge Files
-
-| File | Responsibility |
-|---|---|
-| `ModMain.gd` | Mod entry point and lifecycle |
-| `TurnHook.gd` | Decision interception, turn lifecycle coordination |
-| `ObservationBuilder.gd` | Deterministic game state serialization |
-| `LegalActionBuilder.gd` | Legal action enumeration from UI state |
-| `DecisionValidator.gd` | Action legality and schema validation |
-| `ActionApplier.gd` | Native action application via `on_action_selected()` |
-| `AutoMatchStarter.gd` | Programmatic match start from daemon config (bypasses menu UI) |
-| `FallbackHandler.gd` | Timeout and error fallback action selection |
-| `BridgeClient.gd` | WebSocket transport to daemon |
-| `ProtocolCodec.gd` | Envelope encoding/decoding and canonical hashing |
-| `IdentifierFactory.gd` | Match/turn ID minting |
-| `RuntimeCompatibility.gd` | Game version and signal compatibility checks |
-| `Telemetry.gd` | Lifecycle event emission |
-
-Config files: `config/ModOptions.gd`, `config/default_config.json`.
-
-## Daemon Runtime Config
-
-`schemas/daemon-config.v1.json` validates daemon JSON config files before any match starts. `daemon/src/yomi_daemon/config.py` normalizes that file into a typed `DaemonRuntimeConfig`.
-
-`DaemonRuntimeConfig` fields:
-
-- `version` — config schema version (`"v1"`)
-- `transport` — host, port, optional `auth_secret` (resolved from env var)
-- `decision_timeout_ms` — decision timeout in milliseconds (default 10000)
-- `fallback_mode` — `safe_continue`, `heuristic_guard`, or `last_valid_replayable`
-- `logging` — events, prompts, raw_provider_payloads flags
-- `policy_mapping` — p1/p2 policy ID assignment
-- `policies` — registry of named policies with provider, model, prompt_version, credential, temperature, max_tokens, options
-- `character_selection` — mode (mirror/assigned/random_from_pool/llm_choice), assignments, pool
-- `tournament` — format, mirror_matches_first, side_swap, games_per_pair, fixed_stage
-- `trace_seed` — reproducibility seed
-- `stage_id` — optional stage override
-- `match_options` — optional match configuration (e.g. `starting_hp`)
-- `replay_capture` — replay video recording settings (enabled, vm_machine, display, resolution, framerate, video_codec, preset); default enabled
-
-`DaemonRuntimeConfig.to_config_payload()` emits the narrower `ConfigPayload` used for handshake pinning and manifests. The `effective_stage_id` property resolves from `stage_id` or `tournament.fixed_stage`.
-
-The split is deliberate: runtime config includes daemon concerns (transport, credentials, tournament defaults), while wire config stays safe to share with the mod.
-
-## Config Precedence
-
-Daemon startup resolves config in this order:
-
-1. Built-in defaults in `yomi_daemon.config` for transport, logging, decision timeout, character selection, tournament defaults, and `trace_seed`.
-2. A selected JSON config file, defaulting to `daemon/config/default_config.json`.
-3. CLI overrides from `yomi-daemon --host/--port/--p1-policy/--p2-policy/--trace-seed/--log-level/--record-replay/--no-record-replay/--replay-vm/--replay-display`.
-4. Environment lookup for provider credentials referenced by `credential_env_var`.
-
-Environment variables only supply secret values. They never change structural settings such as policy IDs or transport bindings.
-
-## Manifest
-
-`daemon/src/yomi_daemon/manifest.py` builds a serializable `MatchManifest` before the first decision turn. The manifest pins:
-
-- `match_id` and `created_at` timestamp
-- `daemon_version` (from package `__version__`)
-- `protocol_version` and `schema_version`
-- `trace_seed`
-- `game_version` and `mod_version` (from handshake metadata, nullable)
-- `effective_stage_id`
-- `prompt_version` (pinned when all policies share the same version, else null)
-- `policy_mapping` and per-policy `ManifestPolicyEntry` (provider, model, prompt_version, credential_env_var, credential_configured)
-- `transport` (host + port, no auth secret)
-- `tournament` defaults
-- full `config_snapshot` (`ConfigPayload`)
-
-This ensures failed or incomplete matches still retain pinned config, version, and seed metadata.
+- No control in online or lobby matches. Replays are never controlled.
+- Simulations queue an *assumed* opponent action. They never read the opponent's real queued input, and
+  the opponent side is resolved without touching the human's UI.
+- Locking in through `on_action_submitted` doesn't drive the ghost preview, so a human can't see the
+  bot's pick.
+- The MCP server binds localhost and requires a token. `user://` (keys) is unreadable through tools, and
+  settings changes over MCP can't touch keys or URLs.

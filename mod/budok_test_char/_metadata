@@ -1,0 +1,12 @@
+{
+  "name": "budok_test_char",
+  "friendly_name": "budok Test Fighter",
+  "description": "Test character for budok: Ninja-based fighter with a custom resource, a code-driven move with a charge payload, and a custom extra toggle.",
+  "author": "budok",
+  "version": "1.0.0",
+  "link": "",
+  "id": "budok_test_char",
+  "overwrites": false,
+  "requires": [""],
+  "priority": 0
+}

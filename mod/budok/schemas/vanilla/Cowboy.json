@@ -1,0 +1,424 @@
+{
+  "format": "budok.character.v1",
+  "character": "Cowboy",
+  "provenance": {
+    "by": "budok maintainers",
+    "source": "curated move catalog and character guides from budok-ai"
+  },
+  "summary": {
+    "archetype": "versatile all-rounder",
+    "game_plan": "Cowboy is a versatile all-rounder with tools for every range.",
+    "tips": [
+      "At close range (<50 units): Pommel (h_reach 28, fast, safe), Grab (50), VSlash (68, high damage), 3Combo (48). Mix attacks and grabs.",
+      "At mid range (50-110 units): HSlash2 (h_reach 109), Stinger (82 + lunge), AnkleCutter (92). Cowboy's sword normals are excellent here.",
+      "At long range (110+ units): LightningSliceNeutral (h_reach 147, travels through air), Brandish → Shoot (fullscreen gun), Lasso (250, long-range grab).",
+      "Movement: When >150 units, use Walk Forward or Dash to close into sword range. Super Dash covers big gaps with armor. Don't spam LightningSlice from fullscreen — close distance and use higher-damage melee instead.",
+      "Defense: SpotDodge (invuln frames 5-7, fast recovery) and Foresight are strong.",
+      "Cowboy wins by mixing all three ranges. Don't camp one distance."
+    ]
+  },
+  "moves": {
+    "1000Cuts": {
+      "category": "super",
+      "summary": "1000 Cuts — projectile buff super, enhances all attacks. Costs meter.",
+      "beats": "buffs your next attacks significantly",
+      "loses_to": "costs meter, vulnerable during activation"
+    },
+    "1000CutsEnd": {
+      "category": "super",
+      "summary": "End 1000 Cuts buff early with Fatal Cut."
+    },
+    "3Combo": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "3-hit combo — automatic multi-hit string. Good after Pommel.",
+      "beats": "opponents caught in pressure",
+      "loses_to": "loses to blocking, committed multi-hit"
+    },
+    "3ComboDown": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Aerial 3-hit combo."
+    },
+    "AirGrab": {
+      "category": "grab",
+      "summary": "Aerial throw — air-to-air grab option.",
+      "beats": "airborne blocking opponents",
+      "loses_to": "loses to air attacks, requires both players airborne"
+    },
+    "AnkleCutter": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Ankle Cutter — low sweep, hits crouching opponents.",
+      "beats": "opponents blocking high",
+      "loses_to": "loses to jumping opponents"
+    },
+    "BackSlash": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Backward slash — retreat while attacking. Safe spacing tool.",
+      "beats": "creates space while dealing damage",
+      "loses_to": "lower damage than committed attacks, gives up position"
+    },
+    "Brandish": {
+      "category": "special",
+      "summary": "Quick Draw stance entry. Unlocks Shoot, PointBlank, PistolWhip, and ShootDodge next turn. Use this to access gun moves.",
+      "beats": "sets up powerful gun options",
+      "loses_to": "costs a turn to set up, does no damage itself",
+      "combo_hint": "Unlocks: Shoot2, ShootDodge2, PointBlank, PistolWhip"
+    },
+    "ChargeDash": {
+      "category": "movement",
+      "summary": "Super Dash — armored dash forward, covers large distance. Startup 8 ticks, actionable after ~22 ticks. Goes through single-hit attacks. Best option for closing large distances (200+ units).",
+      "beats": "goes through single-hit attacks (armor), covers the most ground of any movement. Use when FAR from opponent to close the gap.",
+      "loses_to": "8 tick startup (slow), loses to grabs and multi-hit moves. Punishable if predicted."
+    },
+    "Continue": {
+      "category": "utility",
+      "summary": "Continue current action/state."
+    },
+    "Dash": {
+      "category": "movement",
+      "summary": "Dash — quick forward hop. Startup 1 tick (fastest movement option), actionable after ~10 ticks. Projectile invulnerable frames 0-4, hops over low attacks. Use to close distance quickly or dodge projectiles.",
+      "beats": "projectiles (invuln frames 0-4), low attacks (hops over). Fastest way to close distance.",
+      "loses_to": "short distance covered, loses to well-timed attacks."
+    },
+    "DashBackward": {
+      "category": "movement",
+      "summary": "Walk Back — retreat from opponent. Startup 2 ticks, actionable after ~11 ticks. Grab immune frames 1-7. Becomes inactionable if opponent uses forward movement.",
+      "beats": "escapes close-range pressure, grab immune early frames. Creates space for zoning.",
+      "loses_to": "gives up stage position, can get cornered at stage edge. Inactionable if opponent dashes forward."
+    },
+    "DashForward": {
+      "category": "movement",
+      "summary": "Walk Forward — close distance toward opponent. Distance payload (0-100) controls how far. Startup 2 ticks, actionable after ~10-15 ticks. Essential for getting into attack range when your moves can't reach.",
+      "beats": "closes gap so your attacks can connect. Use when OUT OF RANGE for melee attacks. Walk into attack range, THEN attack next turn.",
+      "loses_to": "vulnerable during movement, predictable if repeated. Opponent can anti-air or attack your approach."
+    },
+    "DefensiveBurst": {
+      "category": "defense",
+      "summary": "Burst — invincible reversal, costs burst stock. Emergency escape.",
+      "beats": "escapes combos and pressure",
+      "loses_to": "limited stock (usually 1-2 per match), huge loss if baited"
+    },
+    "DoubleJump": {
+      "category": "movement",
+      "summary": "Double Jump — second jump while airborne. Changes your air trajectory. Use to extend airtime, dodge anti-airs, or reposition in the air.",
+      "beats": "dodges anti-airs by changing trajectory, extends air control.",
+      "loses_to": "uses your air action, can't double jump again."
+    },
+    "DownwardCleave": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Aerial downward cleave."
+    },
+    "DownwardCleaveGround": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Ground downward cleave."
+    },
+    "Fall": {
+      "category": "movement",
+      "summary": "Fall — drop from the air quickly. Use to land faster and become actionable sooner instead of floating. Good after a whiffed air attack or to bait anti-airs.",
+      "beats": "lands quickly to act sooner, baits anti-airs that expect you to stay airborne.",
+      "loses_to": "predictable landing spot."
+    },
+    "FastTeleport": {
+      "category": "super",
+      "range": "far",
+      "summary": "Teleport — instant repositioning super. Costs meter.",
+      "beats": "escapes pressure, repositions instantly",
+      "loses_to": "costs meter, does no damage"
+    },
+    "Foresight": {
+      "category": "special",
+      "summary": "Place temporal afterimage marker. Can teleport back to it later.",
+      "beats": "creates escape option / mixup potential",
+      "loses_to": "does no damage, costs a turn to set up"
+    },
+    "ForesightNeutral": {
+      "category": "special",
+      "summary": "Neutral Foresight placement."
+    },
+    "ForwardDashFollowup": {
+      "category": "attack",
+      "summary": "Follow-up attack after a forward dash. Good for closing distance and attacking.",
+      "beats": "blocking opponents at mid range",
+      "loses_to": "punishable on block if predicted"
+    },
+    "Getup": {
+      "category": "utility",
+      "summary": "Wake up from knockdown."
+    },
+    "Grab": {
+      "category": "grab",
+      "summary": "Throw — beats blocking, loses to attacks. h_reach ~50 units. Must be close to opponent to connect. If opponent is out of range, close distance first with DashForward or Dash.",
+      "beats": "blocking opponents (grabs go through block).",
+      "loses_to": "loses to attacks (any attack beats grab), very short range (~50 units). Will whiff if opponent is further than 50 units."
+    },
+    "GunReel": {
+      "category": "special",
+      "range": "far",
+      "summary": "Pull thrown gun back with lasso."
+    },
+    "GunThrow": {
+      "category": "special",
+      "range": "far",
+      "summary": "Throw your gun as a projectile. Loses gun access until retrieved.",
+      "loses_to": "loses gun access, need GunReel to recover"
+    },
+    "Guntrick": {
+      "category": "defense",
+      "summary": "Gun Trick — counter-parry with gun. Counters attacks with a shot.",
+      "beats": "punishes attacks automatically",
+      "loses_to": "loses to grabs, low damage"
+    },
+    "HAirSlash": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Aerial Horizontal Slash."
+    },
+    "HSlash2": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Horizontal Slash — mid-range sword swing.",
+      "beats": "opponents in range without blocking",
+      "loses_to": "loses to blocking (punishable), slow startup vs fast attacks"
+    },
+    "Holster": {
+      "category": "special",
+      "summary": "Holster gun — exit Quick Draw stance."
+    },
+    "Impale": {
+      "category": "grab",
+      "range": "close",
+      "summary": "Impale — very high damage commitment. Huge risk, huge reward.",
+      "beats": "blocking opponents, massive damage if it lands",
+      "loses_to": "extremely slow, any attack beats it, huge whiff punish",
+      "risk": "high"
+    },
+    "ImpaleTeleport": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Teleport Impale variant — teleports behind opponent regardless of distance."
+    },
+    "InstantCancel": {
+      "category": "utility",
+      "summary": "Cancel current move animation instantly. Costs meter."
+    },
+    "IzunaDrop": {
+      "category": "grab",
+      "range": "close",
+      "summary": "Izuna Drop — high-damage command grab.",
+      "beats": "blocking opponents at close range",
+      "loses_to": "very slow, easily interrupted by any attack",
+      "risk": "high"
+    },
+    "Jump": {
+      "category": "movement",
+      "summary": "Jump — become airborne. JumpArc payload controls trajectory (x: horizontal direction, y: height). Startup 2-5 ticks. Short jumps actionable in ~10 ticks, high jumps ~15. Avoids grabs and ground attacks. Enables aerial attacks on landing.",
+      "beats": "avoids ALL grabs and ground-only attacks. Repositions vertically. Use to approach over projectiles or escape grab pressure.",
+      "loses_to": "predictable landing trajectory, vulnerable to anti-airs (UpwardSwipe). Aerial blocking is weaker than ground blocking (+2 block disadvantage)."
+    },
+    "Lasso": {
+      "category": "grab",
+      "range": "far",
+      "summary": "Lasso — thrown rope, leads to Pull or Izuna Drop on hit. Long-range grab.",
+      "beats": "blocking opponents at range",
+      "loses_to": "loses to attacks (can be hit during throw), slow"
+    },
+    "LassoPull": {
+      "category": "grab",
+      "range": "far",
+      "summary": "Pull opponent after Lasso lands."
+    },
+    "LassoReel": {
+      "category": "grab",
+      "range": "far",
+      "summary": "Izuna Drop finisher from Lasso."
+    },
+    "LightningSlice": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Lightning Slice — directional aerial slash, dashes 120 units. Effective range ~250 units. Loses to blocking, punishable on whiff.",
+      "beats": "opponents in the air, good at range",
+      "loses_to": "loses to blocking, punishable on whiff, airborne so vulnerable to anti-airs",
+      "risk": "medium"
+    },
+    "LightningSliceCancel": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Lightning Slice cancel — dashes 120 units, faster recovery, less damage. Effective range ~250 units.",
+      "beats": "safe chip at range",
+      "loses_to": "low damage, still loses to blocking"
+    },
+    "LightningSliceNeutral": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Lightning Slice neutral — dashes 120 units through air then slashes. Effective range ~250 units total (120 travel + 147 hitbox). Will NOT reach at 300+ units.",
+      "beats": "opponents at range without blocking",
+      "loses_to": "loses to blocking and parry, punishable on whiff, predictable if overused",
+      "risk": "medium"
+    },
+    "OffensiveBurst": {
+      "category": "attack",
+      "summary": "Burst Cancel — cancel current attack into pressure. Costs burst.",
+      "beats": "extends combos, creates mixups",
+      "loses_to": "costs burst stock, wasted if not in an attack"
+    },
+    "ParryAfterWhiff": {
+      "category": "defense",
+      "summary": "Block after a whiffed attack. Same as ParryHigh but in recovery.",
+      "beats": "attacks after your whiff",
+      "loses_to": "loses to grabs"
+    },
+    "ParryHigh": {
+      "category": "defense",
+      "summary": "Block high/mid attacks. Parry timing count sets active parry frames (1-20).",
+      "beats": "attacks, projectiles",
+      "loses_to": "loses to grabs, does no damage"
+    },
+    "ParrySuper": {
+      "category": "defense",
+      "summary": "Push Block — costs meter, creates distance on block.",
+      "beats": "attacks, creates space",
+      "loses_to": "costs meter, loses to grabs"
+    },
+    "PistolWhip": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Pistol Whip — multi-hit gun-butt attack. Requires Quick Draw stance.",
+      "beats": "close-range pressure, chip damage through block",
+      "loses_to": "short range, punishable if dodged"
+    },
+    "PistolWhipCombo": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Pistol Whip combo follow-up."
+    },
+    "PistolWhipGround": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Ground Pistol Whip — multi-hit."
+    },
+    "PointBlank": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Point Blank — close-range devastating shot. Requires Quick Draw stance.",
+      "beats": "close opponents, massive damage",
+      "loses_to": "very short range, requires Brandish stance first, costs bullet"
+    },
+    "Pommel": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Pommel strike — fast, safe on block. Combos into 3Combo or HSlash2.",
+      "beats": "beats grabs due to speed, safe pressure starter",
+      "loses_to": "low damage, short range"
+    },
+    "QuickerDraw": {
+      "category": "special",
+      "summary": "Faster Quick Draw variant. Unlocks gun moves like Brandish.",
+      "combo_hint": "Unlocks: Shoot2, ShootDodge2, PointBlank, PistolWhip"
+    },
+    "Roll": {
+      "category": "defense",
+      "summary": "Dodge — invincible roll. Has invincibility frames that avoid all attacks. Good for escaping pressure or dodging predictable attacks. Direction is usually fixed.",
+      "beats": "attacks (invincible frames), projectiles, repositions while safe.",
+      "loses_to": "vulnerable after invincibility ends, loses to delayed attacks and grabs."
+    },
+    "Shoot2": {
+      "category": "attack",
+      "range": "fullscreen",
+      "summary": "Shoot — fires revolver bullet. Costs 1 bullet. Requires Quick Draw stance (use Brandish first).",
+      "beats": "opponents at any range",
+      "loses_to": "limited bullets, requires Brandish stance first"
+    },
+    "ShootDodge2": {
+      "category": "attack",
+      "range": "fullscreen",
+      "summary": "Shoot while dodging — evasive gunshot. Requires Quick Draw stance.",
+      "beats": "attacks while also shooting",
+      "loses_to": "limited bullets, requires Brandish stance first"
+    },
+    "SlowHolster": {
+      "category": "special",
+      "summary": "Slow holster."
+    },
+    "SpotDodge": {
+      "category": "defense",
+      "summary": "Spot Dodge — quick stationary dodge, fast recovery.",
+      "beats": "avoids attacks without moving, fast recovery allows punish",
+      "loses_to": "loses to grabs, loses to delayed attacks"
+    },
+    "Stinger": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Stinger — forward lunge stab. Hitbox 82 + lunges forward ~60 units. Effective range ~140 units. Best mid-range poke but punishable on whiff.",
+      "beats": "opponents at mid range, good punish tool",
+      "loses_to": "very punishable on block or whiff, committed lunge"
+    },
+    "SuperJump": {
+      "category": "movement",
+      "summary": "Super Jump — high/far jump covering more distance than normal jump. JumpArc payload controls arc. Startup 5 ticks. Covers large horizontal and vertical distance. Use for big repositioning or escaping corner pressure.",
+      "beats": "escapes pressure, covers large distance, avoids grabs and ground attacks.",
+      "loses_to": "longer airtime makes landing predictable. Vulnerable to anti-airs."
+    },
+    "Taunt": {
+      "category": "utility",
+      "summary": "Hustle/taunt — builds meter but leaves you vulnerable.",
+      "beats": "builds meter at safe range",
+      "loses_to": "fully vulnerable during animation, punishable at any range"
+    },
+    "TechRoll": {
+      "category": "defense",
+      "summary": "Tech Dodge — invincible roll on knockdown. Use when knocked down to escape wakeup pressure. Repositions while invincible.",
+      "beats": "avoids wakeup pressure (meaties, grabs on your wakeup).",
+      "loses_to": "direction is predictable, opponent can read and chase."
+    },
+    "TimeBullet": {
+      "category": "super",
+      "range": "fullscreen",
+      "summary": "Temporal Round — fires a time-frozen bullet. Costs meter."
+    },
+    "TimeSplitter": {
+      "category": "super",
+      "summary": "Time Splitter — multi-hit temporal super, 12 hits. Costs meter.",
+      "beats": "massive damage if it connects",
+      "loses_to": "costs meter, punishable if blocked or whiffed"
+    },
+    "UpwardSwipe": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Upward Swipe — anti-air sword launch. Use when opponent is airborne.",
+      "beats": "airborne opponents, launches for combos",
+      "loses_to": "short range, whiffs vs grounded opponents at distance"
+    },
+    "UpwardSwipeAir": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Aerial Upward Swipe."
+    },
+    "VAirSlash": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Aerial Vertical Slash."
+    },
+    "VSlash": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Vertical Slash — overhead sword swing, strong damage.",
+      "beats": "grounded opponents, good combo ender",
+      "loses_to": "loses to blocking, slow startup"
+    },
+    "Wait": {
+      "category": "utility",
+      "summary": "Do nothing this turn. Low commitment, preserves options.",
+      "beats": "nothing directly, but avoids overcommitting",
+      "loses_to": "gives up initiative, opponent acts freely"
+    },
+    "WhiffInstantCancel": {
+      "category": "utility",
+      "summary": "Cancel a whiffed move. Costs meter."
+    }
+  }
+}

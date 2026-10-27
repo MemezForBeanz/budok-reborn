@@ -1,0 +1,66 @@
+[gd_scene load_steps=7 format=2]
+
+[ext_resource path="res://characters/stickman/NinjaGuy.tscn" type="PackedScene" id=1]
+[ext_resource path="res://budok_test_char/Tester.gd" type="Script" id=2]
+[ext_resource path="res://budok_test_char/states/ChargeBlast.gd" type="Script" id=3]
+[ext_resource path="res://mechanics/Hitbox.gd" type="Script" id=4]
+[ext_resource path="res://budok_test_char/ChargeBlastUIData.tscn" type="PackedScene" id=5]
+[ext_resource path="res://budok_test_char/TesterExtra.tscn" type="PackedScene" id=6]
+
+[node name="Tester" instance=ExtResource( 1 )]
+script = ExtResource( 2 )
+MAX_HEALTH = 1200
+player_extra_params_scene = ExtResource( 6 )
+extra_state_variables = "can_summon_kunai
+can_summon_kick
+bomb_thrown
+bomb_projectile
+momentum_stores
+stored_momentum_x
+stored_momentum_y
+sticky_bombs_left
+quick_slash_start_pos_x
+quick_slash_start_pos_y
+quick_slash_move_dir_x
+quick_slash_move_dir_y
+grappling_hook_projectile
+used_grappling_hook
+substituted_objects
+skull_shaker_bleed_ticks
+stored_speed_1
+stored_speed_2
+stored_speed_3
+released_this_turn
+current_momentum
+boosted_during_combo
+stackriken_out
+can_divekick_hop
+charge_level"
+
+[node name="ChargeBlast" type="Node2D" parent="StateMachine"]
+script = ExtResource( 3 )
+apply_forces = true
+apply_fric = true
+apply_grav = true
+sprite_animation = "PalmStrike"
+anim_length = 26
+iasa_at = -1
+title = "Charge Blast"
+type = 1
+data_ui_scene = ExtResource( 5 )
+interrupt_from_string = "Grounded
+GroundedAttack"
+interrupt_into_string = "Grounded
+Aerial"
+hit_cancel_into_string = "GroundedSuper"
+
+[node name="Hitbox" type="Node2D" parent="StateMachine/ChargeBlast"]
+script = ExtResource( 4 )
+x = 26
+y = -16
+width = 22
+height = 14
+damage = 50
+hitstun_ticks = 24
+start_tick = 8
+active_ticks = 3

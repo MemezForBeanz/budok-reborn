@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/memezforbeanz/budok-reborn/schemas/character.v1.json",
+  "title": "budok character notes (budok.character.v1)",
+  "description": "Human/LLM-written notes for a YOMI Hustle character. Frame data, meter costs and payload shapes are measured from the game at runtime and are deliberately not part of this format.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "format": {"const": "budok.character.v1"},
+    "character": {"type": "string", "description": "Display name (without the F-<hash>__ prefix)."},
+    "fingerprint": {"type": "string", "description": "Skeleton fingerprint the notes were written against; budok flags notes as stale when it changes."},
+    "override": {"type": "boolean", "description": "User files only: prefer these notes over mod-shipped or bundled ones."},
+    "provenance": {"type": "object"},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "archetype": {"$ref": "#/$defs/text"},
+        "game_plan": {"$ref": "#/$defs/text"},
+        "strengths": {"$ref": "#/$defs/text_list"},
+        "weaknesses": {"$ref": "#/$defs/text_list"},
+        "tips": {"$ref": "#/$defs/text_list"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "description": "Keyed by the character script's variable name.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {"$ref": "#/$defs/text"},
+          "meaning": {"$ref": "#/$defs/text"},
+          "hidden": {"type": "boolean"}
+        }
+      }
+    },
+    "extras": {
+      "type": "object",
+      "description": "Keyed by the character extra option name (from the extras panel).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"meaning": {"$ref": "#/$defs/text"}}
+      }
+    },
+    "moves": {
+      "type": "object",
+      "description": "Keyed by state (node) name.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {"enum": ["attack", "grab", "projectile", "movement", "defense", "super", "special", "utility", "install", "counter"]},
+          "range": {"enum": ["close", "mid", "far", "fullscreen", "any"]},
+          "risk": {"enum": ["low", "medium", "high"]},
+          "summary": {"$ref": "#/$defs/text"},
+          "beats": {"$ref": "#/$defs/text"},
+          "loses_to": {"$ref": "#/$defs/text"},
+          "use_when": {"$ref": "#/$defs/text"},
+          "avoid_when": {"$ref": "#/$defs/text"},
+          "payload_hint": {"$ref": "#/$defs/text"},
+          "combo_hint": {"$ref": "#/$defs/text"},
+          "tags": {"$ref": "#/$defs/text_list"}
+        }
+      }
+    },
+    "characters": {
+      "type": "object",
+      "description": "Only in a mod's budok_schema.json: several characters keyed by display name.",
+      "additionalProperties": {"$ref": "#"}
+    }
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1, "maxLength": 600},
+    "text_list": {"type": "array", "items": {"$ref": "#/$defs/text"}, "maxItems": 8}
+  }
+}

@@ -1,6 +1,15 @@
 # budok-reborn: Refactor Plan
 
-Status: proposal. Nothing in here is implemented yet.
+Status: **implemented** (first full pass, see README and docs/). Not yet verified inside a live game.
+
+Decisions taken after the proposal:
+1. The MCP server lives in the mod, and so does token mode (LLM calls over HTTPS from GDScript).
+2. The headless VM / tournament / video pipeline was removed. Automation is now an in-game GDScript hook
+   plus an external MCP connector (`connectors/python`).
+3. Tested against a bundled test character (`mod/budok_test_char`); the maintainer tests real mods locally.
+4. The community registry is opt-in. Schemas shipped inside a character's mod are used without generation.
+5. Added during implementation: per-role AI settings (move making vs schema creation) and an engine-backed
+   `simulate` tool.
 
 ## 1. Goal
 

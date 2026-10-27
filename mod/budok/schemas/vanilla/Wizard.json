@@ -1,0 +1,343 @@
+{
+  "format": "budok.character.v1",
+  "character": "Wizard",
+  "provenance": {
+    "by": "budok maintainers",
+    "source": "curated move catalog and character guides from budok-ai"
+  },
+  "summary": {
+    "archetype": "zoner/spellcaster",
+    "game_plan": "Wizard is a zoner/spellcaster — your goal is to control space with projectiles and spells, NOT to sit and block.",
+    "tips": [
+      "At close range (<50 units): TomeSlap (h_reach 32, fastest), Kick, VileClutch/Grab. Do NOT just parry — parrying repeatedly is the #1 mistake.",
+      "At mid range (50-120 units): BoltOfMagma (h_reach 75, high damage), IceSpikeGround (h_reach 55), ConjureWeapon (h_reach 85). These are Wizard's best tools.",
+      "At long range (120+ units): MagicMissile (fullscreen projectile), FlameWave (h_reach 250 projectile), ConjureStorm (h_reach 104). Wizard EXCELS here — use ranged spells.",
+      "Movement: Walk Back to create zoning distance. If opponent closes in, use Gust to push them away. Liftoff covers ~200 units as a dash-attack.",
+      "NEVER parry more than 2 turns in a row. Wizard has the best ranged kit — USE IT.",
+      "WARNING: ManaStrike has only 12 unit h_reach and HIGH commitment (long animation). Avoid it unless point-blank. TomeSlap (32) is better at close range."
+    ]
+  },
+  "moves": {
+    "AirGrab": {
+      "category": "grab",
+      "summary": "Aerial throw — air-to-air grab option.",
+      "beats": "airborne blocking opponents",
+      "loses_to": "loses to air attacks, requires both players airborne"
+    },
+    "AirKick": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Mana Kick — aerial mana kick."
+    },
+    "BoltOfMagma": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Bolt of Magma — multi-hit magma blast. Strong damage at mid range.",
+      "beats": "mid-range pressure, multi-hit chips through block",
+      "loses_to": "punishable at close range if dodged",
+      "risk": "medium"
+    },
+    "ChargeDash": {
+      "category": "movement",
+      "summary": "Super Dash — armored dash forward, covers large distance. Startup 8 ticks, actionable after ~22 ticks. Goes through single-hit attacks. Best option for closing large distances (200+ units).",
+      "beats": "goes through single-hit attacks (armor), covers the most ground of any movement. Use when FAR from opponent to close the gap.",
+      "loses_to": "8 tick startup (slow), loses to grabs and multi-hit moves. Punishable if predicted."
+    },
+    "Combust": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Combustion — aerial explosion attack.",
+      "beats": "high damage if positioned correctly",
+      "loses_to": "short range, aerial only"
+    },
+    "ConfusingTouch": {
+      "category": "special",
+      "range": "close",
+      "summary": "Confusing Touch — multi-hit debuff move."
+    },
+    "ConjureStorm": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Conjure Storm — 3-hit storm, slow startup. Element/direction payload.",
+      "beats": "area control, multi-hit at range",
+      "loses_to": "very slow startup, punishable up close",
+      "risk": "high"
+    },
+    "ConjureWeapon": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Conjure Weapon — create weapon to attack, high damage.",
+      "beats": "solid mid-range attack",
+      "loses_to": "moderate startup, loses to fast attacks"
+    },
+    "Continue": {
+      "category": "utility",
+      "summary": "Continue current action/state."
+    },
+    "Dash": {
+      "category": "movement",
+      "summary": "Dash — quick forward hop. Startup 1 tick (fastest movement option), actionable after ~10 ticks. Projectile invulnerable frames 0-4, hops over low attacks. Use to close distance quickly or dodge projectiles.",
+      "beats": "projectiles (invuln frames 0-4), low attacks (hops over). Fastest way to close distance.",
+      "loses_to": "short distance covered, loses to well-timed attacks."
+    },
+    "DashBackward": {
+      "category": "movement",
+      "summary": "Walk Back — retreat from opponent. Startup 2 ticks, actionable after ~11 ticks. Grab immune frames 1-7. Becomes inactionable if opponent uses forward movement.",
+      "beats": "escapes close-range pressure, grab immune early frames. Creates space for zoning.",
+      "loses_to": "gives up stage position, can get cornered at stage edge. Inactionable if opponent dashes forward."
+    },
+    "DashForward": {
+      "category": "movement",
+      "summary": "Walk Forward — close distance toward opponent. Distance payload (0-100) controls how far. Startup 2 ticks, actionable after ~10-15 ticks. Essential for getting into attack range when your moves can't reach.",
+      "beats": "closes gap so your attacks can connect. Use when OUT OF RANGE for melee attacks. Walk into attack range, THEN attack next turn.",
+      "loses_to": "vulnerable during movement, predictable if repeated. Opponent can anti-air or attack your approach."
+    },
+    "DefensiveBurst": {
+      "category": "defense",
+      "summary": "Burst — invincible reversal, costs burst stock. Emergency escape.",
+      "beats": "escapes combos and pressure",
+      "loses_to": "limited stock (usually 1-2 per match), huge loss if baited"
+    },
+    "DoubleJump": {
+      "category": "movement",
+      "summary": "Double Jump — second jump while airborne. Changes your air trajectory. Use to extend airtime, dodge anti-airs, or reposition in the air.",
+      "beats": "dodges anti-airs by changing trajectory, extends air control.",
+      "loses_to": "uses your air action, can't double jump again."
+    },
+    "Fall": {
+      "category": "movement",
+      "summary": "Fall — drop from the air quickly. Use to land faster and become actionable sooner instead of floating. Good after a whiffed air attack or to bait anti-airs.",
+      "beats": "lands quickly to act sooner, baits anti-airs that expect you to stay airborne.",
+      "loses_to": "predictable landing spot."
+    },
+    "FlameWave": {
+      "category": "special",
+      "range": "far",
+      "summary": "Flame Wave — fire projectile.",
+      "beats": "zone control, safe at range",
+      "loses_to": "loses to jumping over, slow"
+    },
+    "ForwardDashFollowup": {
+      "category": "attack",
+      "summary": "Follow-up attack after a forward dash. Good for closing distance and attacking.",
+      "beats": "blocking opponents at mid range",
+      "loses_to": "punishable on block if predicted"
+    },
+    "Getup": {
+      "category": "utility",
+      "summary": "Wake up from knockdown."
+    },
+    "Geyser": {
+      "category": "special",
+      "range": "far",
+      "summary": "Geyser — trap that erupts. 3 charge levels: higher charge = more damage and range. Set up, then detonate.",
+      "beats": "massive damage at max charge, area denial",
+      "loses_to": "slow to charge, telegraphed",
+      "risk": "high"
+    },
+    "Grab": {
+      "category": "grab",
+      "summary": "Throw — beats blocking, loses to attacks. h_reach ~50 units. Must be close to opponent to connect. If opponent is out of range, close distance first with DashForward or Dash.",
+      "beats": "blocking opponents (grabs go through block).",
+      "loses_to": "loses to attacks (any attack beats grab), very short range (~50 units). Will whiff if opponent is further than 50 units."
+    },
+    "Gust": {
+      "category": "special",
+      "range": "mid",
+      "summary": "Gust — wind blast for movement/pushback.",
+      "beats": "pushes opponent away, creates space",
+      "loses_to": "does no damage"
+    },
+    "IceSpikeAir": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Aerial Icicle — multi-hit ice."
+    },
+    "IceSpikeGround": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Icicle — ground ice spike.",
+      "beats": "grounded opponents at mid range",
+      "loses_to": "loses to jumping"
+    },
+    "InstantCancel": {
+      "category": "utility",
+      "summary": "Cancel current move animation instantly. Costs meter."
+    },
+    "Jump": {
+      "category": "movement",
+      "summary": "Jump — become airborne. JumpArc payload controls trajectory (x: horizontal direction, y: height). Startup 2-5 ticks. Short jumps actionable in ~10 ticks, high jumps ~15. Avoids grabs and ground attacks. Enables aerial attacks on landing.",
+      "beats": "avoids ALL grabs and ground-only attacks. Repositions vertically. Use to approach over projectiles or escape grab pressure.",
+      "loses_to": "predictable landing trajectory, vulnerable to anti-airs (UpwardSwipe). Aerial blocking is weaker than ground blocking (+2 block disadvantage)."
+    },
+    "Kick": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Kick — grounded kick.",
+      "beats": "close-range poke",
+      "loses_to": "nothing special, short range"
+    },
+    "Launch": {
+      "category": "super",
+      "range": "far",
+      "summary": "Launch orb forward — sends orb as projectile."
+    },
+    "Liftoff": {
+      "category": "special",
+      "range": "far",
+      "summary": "Missile Form — dash attack covering ~200 units. Effective range ~215 units. Fast approach but loses to blocking.",
+      "beats": "fast approach, covers distance while attacking",
+      "loses_to": "loses to blocking, committed movement"
+    },
+    "MagicMissile": {
+      "category": "special",
+      "range": "fullscreen",
+      "summary": "Magic Dart — aimable projectile.",
+      "beats": "safe chip at any range, aimable",
+      "loses_to": "very low damage"
+    },
+    "ManaStrike": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Mana Strike — very short range mana punch (h_reach 12 only!). HIGH commitment: long animation locks you for 30+ ticks. Avoid unless point-blank (<20 units). TomeSlap (h_reach 32) is almost always better.",
+      "beats": "versatile fast attack in air or ground",
+      "loses_to": "short range",
+      "risk": "high"
+    },
+    "OffensiveBurst": {
+      "category": "attack",
+      "summary": "Burst Cancel — cancel current attack into pressure. Costs burst.",
+      "beats": "extends combos, creates mixups",
+      "loses_to": "costs burst stock, wasted if not in an attack"
+    },
+    "Orb": {
+      "category": "super",
+      "summary": "Orb — create magic orb. Opens up many follow-up options (Launch, SparkBomb, Teleport). Costs meter.",
+      "beats": "versatile setup tool",
+      "loses_to": "costs meter, needs follow-up to be useful"
+    },
+    "OrbPush": {
+      "category": "super",
+      "range": "mid",
+      "summary": "Push orb away."
+    },
+    "OrbTeleport": {
+      "category": "super",
+      "range": "fullscreen",
+      "summary": "Orb Portal — teleport to orb location. Instant.",
+      "beats": "instant repositioning to orb",
+      "loses_to": "requires orb to be placed first"
+    },
+    "OrbTether": {
+      "category": "super",
+      "summary": "Tether to orb — connect yourself to the orb."
+    },
+    "ParryAfterWhiff": {
+      "category": "defense",
+      "summary": "Block after a whiffed attack. Same as ParryHigh but in recovery.",
+      "beats": "attacks after your whiff",
+      "loses_to": "loses to grabs"
+    },
+    "ParryHigh": {
+      "category": "defense",
+      "summary": "Block high/mid attacks. Parry timing count sets active parry frames (1-20).",
+      "beats": "attacks, projectiles",
+      "loses_to": "loses to grabs, does no damage"
+    },
+    "ParrySuper": {
+      "category": "defense",
+      "summary": "Push Block — costs meter, creates distance on block.",
+      "beats": "attacks, creates space",
+      "loses_to": "costs meter, loses to grabs"
+    },
+    "Roll": {
+      "category": "defense",
+      "summary": "Dodge — invincible roll. Has invincibility frames that avoid all attacks. Good for escaping pressure or dodging predictable attacks. Direction is usually fixed.",
+      "beats": "attacks (invincible frames), projectiles, repositions while safe.",
+      "loses_to": "vulnerable after invincibility ends, loses to delayed attacks and grabs."
+    },
+    "Sandstorm": {
+      "category": "special",
+      "range": "mid",
+      "summary": "Sandstorm — trap/zone control.",
+      "beats": "area denial, limits opponent movement",
+      "loses_to": "delayed effect"
+    },
+    "SparkBomb": {
+      "category": "super",
+      "range": "mid",
+      "summary": "Spark Bomb — orb explodes for high damage.",
+      "beats": "high damage if orb is near opponent",
+      "loses_to": "requires orb positioned near opponent"
+    },
+    "SpotDodge": {
+      "category": "defense",
+      "summary": "Spot Dodge — stationary invincible dodge. Grab invulnerable frames 1-4, fully invulnerable frames 5-7, actionable at frame 11. Beats both attacks and grabs briefly. Very fast recovery allows punishing after dodging.",
+      "beats": "avoids attacks AND grabs without moving. Fast recovery (11 ticks) lets you punish after dodging.",
+      "loses_to": "loses to attacks that hit after frame 7 (delayed attacks, multi-hit moves). Short invulnerability window."
+    },
+    "SuperJump": {
+      "category": "movement",
+      "summary": "Super Jump — high/far jump covering more distance than normal jump. JumpArc payload controls arc. Startup 5 ticks. Covers large horizontal and vertical distance. Use for big repositioning or escaping corner pressure.",
+      "beats": "escapes pressure, covers large distance, avoids grabs and ground attacks.",
+      "loses_to": "longer airtime makes landing predictable. Vulnerable to anti-airs."
+    },
+    "SuperLaunch": {
+      "category": "super",
+      "range": "far",
+      "summary": "Redirect orb."
+    },
+    "Taunt": {
+      "category": "utility",
+      "summary": "Hustle/taunt — builds meter but leaves you vulnerable.",
+      "beats": "builds meter at safe range",
+      "loses_to": "fully vulnerable during animation, punishable at any range"
+    },
+    "TechRoll": {
+      "category": "defense",
+      "summary": "Tech Dodge — invincible roll on knockdown. Use when knocked down to escape wakeup pressure. Repositions while invincible.",
+      "beats": "avoids wakeup pressure (meaties, grabs on your wakeup).",
+      "loses_to": "direction is predictable, opponent can read and chase."
+    },
+    "Telekinesis": {
+      "category": "super",
+      "summary": "Telekinesis — control orb position."
+    },
+    "TomeSlap": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Tome Slap — fast book slap. Wizard's fastest attack.",
+      "beats": "beats grabs, quick interrupt",
+      "loses_to": "short range, low damage"
+    },
+    "VileClutch": {
+      "category": "grab",
+      "range": "close",
+      "summary": "Vile Clutch — fast grab. Wizard's quickest grab option.",
+      "beats": "catches blocking opponents quickly",
+      "loses_to": "short range, loses to attacks"
+    },
+    "Wait": {
+      "category": "utility",
+      "summary": "Do nothing this turn. Low commitment, preserves options.",
+      "beats": "nothing directly, but avoids overcommitting",
+      "loses_to": "gives up initiative, opponent acts freely"
+    },
+    "WhiffInstantCancel": {
+      "category": "utility",
+      "summary": "Cancel a whiffed move. Costs meter."
+    },
+    "WindForce": {
+      "category": "special",
+      "range": "mid",
+      "summary": "Zephyr — low damage wind utility."
+    },
+    "ZephyrThrow": {
+      "category": "grab",
+      "range": "close",
+      "summary": "Zephyr Throw — wind-powered throw, very high damage.",
+      "beats": "blocking opponents, massive damage grab",
+      "loses_to": "short range, loses to attacks"
+    }
+  }
+}

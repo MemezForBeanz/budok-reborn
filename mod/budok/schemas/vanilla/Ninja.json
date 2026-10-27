@@ -1,0 +1,380 @@
+{
+  "format": "budok.character.v1",
+  "character": "Ninja",
+  "provenance": {
+    "by": "budok maintainers",
+    "source": "curated move catalog and character guides from budok-ai"
+  },
+  "summary": {
+    "archetype": "rushdown/mixup",
+    "game_plan": "Ninja is a rushdown/mixup character — stay close and overwhelm with fast attacks.",
+    "tips": [
+      "Getting in: Dash (projectile invuln frames 0-4, hops lows), SlideKick (travels ~150 units along ground), DropKick (lunges ~150 units). Use Shuriken at range to force reactions.",
+      "At close range: NunChukLight (h_reach 51, fast), GroundedPunch (33, fastest), Uppercut (28, huge damage launcher), Grab. Mix attacks and grabs.",
+      "Key combos: GroundedPunch → NunChukLight → Uppercut for big damage.",
+      "Movement: Ninja's speed advantage only works up close. If far, use Dash or Walk Forward to close in. GrapplingHook repositions from range. Don't throw short-range attacks from mid range — they WILL whiff."
+    ]
+  },
+  "moves": {
+    "AirAttack": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Aerial kick."
+    },
+    "AirFireball": {
+      "category": "special",
+      "range": "fullscreen",
+      "summary": "Aerial Shuriken — airborne projectile."
+    },
+    "AirGrab": {
+      "category": "grab",
+      "summary": "Aerial throw — air-to-air grab option.",
+      "beats": "airborne blocking opponents",
+      "loses_to": "loses to air attacks, requires both players airborne"
+    },
+    "AirUpwardPunch": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Aerial upward punch — air-to-air.",
+      "beats": "airborne opponents",
+      "loses_to": "low damage"
+    },
+    "BackSway": {
+      "category": "defense",
+      "summary": "Backward sway dodge — avoids attacks while staying close.",
+      "beats": "avoids close-range attacks",
+      "loses_to": "loses to grabs, doesn't create much distance"
+    },
+    "Caltrops": {
+      "category": "super",
+      "range": "mid",
+      "summary": "Caltrops — drops trap projectiles on the ground. Area denial.",
+      "beats": "controls ground space",
+      "loses_to": "low damage, costs meter"
+    },
+    "ChargeDash": {
+      "category": "movement",
+      "summary": "Super Dash — armored dash forward, covers large distance. Startup 8 ticks, actionable after ~22 ticks. Goes through single-hit attacks. Best option for closing large distances (200+ units).",
+      "beats": "goes through single-hit attacks (armor), covers the most ground of any movement. Use when FAR from opponent to close the gap.",
+      "loses_to": "8 tick startup (slow), loses to grabs and multi-hit moves. Punishable if predicted."
+    },
+    "Continue": {
+      "category": "utility",
+      "summary": "Continue current action/state."
+    },
+    "Dash": {
+      "category": "movement",
+      "summary": "Dash — quick forward hop. Startup 1 tick (fastest movement option), actionable after ~10 ticks. Projectile invulnerable frames 0-4, hops over low attacks. Use to close distance quickly or dodge projectiles.",
+      "beats": "projectiles (invuln frames 0-4), low attacks (hops over). Fastest way to close distance.",
+      "loses_to": "short distance covered, loses to well-timed attacks."
+    },
+    "DashBackward": {
+      "category": "movement",
+      "summary": "Walk Back — retreat from opponent. Startup 2 ticks, actionable after ~11 ticks. Grab immune frames 1-7. Becomes inactionable if opponent uses forward movement.",
+      "beats": "escapes close-range pressure, grab immune early frames. Creates space for zoning.",
+      "loses_to": "gives up stage position, can get cornered at stage edge. Inactionable if opponent dashes forward."
+    },
+    "DashForward": {
+      "category": "movement",
+      "summary": "Walk Forward — close distance toward opponent. Distance payload (0-100) controls how far. Startup 2 ticks, actionable after ~10-15 ticks. Essential for getting into attack range when your moves can't reach.",
+      "beats": "closes gap so your attacks can connect. Use when OUT OF RANGE for melee attacks. Walk into attack range, THEN attack next turn.",
+      "loses_to": "vulnerable during movement, predictable if repeated. Opponent can anti-air or attack your approach."
+    },
+    "DefensiveBurst": {
+      "category": "defense",
+      "summary": "Burst — invincible reversal, costs burst stock. Emergency escape.",
+      "beats": "escapes combos and pressure",
+      "loses_to": "limited stock (usually 1-2 per match), huge loss if baited"
+    },
+    "DiveKick": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Dive Kick — aerial dive kick downward.",
+      "beats": "grounded opponents from air",
+      "loses_to": "loses to anti-airs"
+    },
+    "DiveKick2": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Dive Kick ground version."
+    },
+    "DoubleJump": {
+      "category": "movement",
+      "summary": "Double Jump — second jump while airborne. Changes your air trajectory. Use to extend airtime, dodge anti-airs, or reposition in the air.",
+      "beats": "dodges anti-airs by changing trajectory, extends air control.",
+      "loses_to": "uses your air action, can't double jump again."
+    },
+    "DropKick": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Drop Kick — running forward kick. Hitbox 36 + travels ~120 units forward. Effective range ~150 units. Very punishable on block.",
+      "beats": "opponents at mid-long range",
+      "loses_to": "very punishable on block, committed forward movement",
+      "risk": "medium"
+    },
+    "Fall": {
+      "category": "movement",
+      "summary": "Fall — drop from the air quickly. Use to land faster and become actionable sooner instead of floating. Good after a whiffed air attack or to bait anti-airs.",
+      "beats": "lands quickly to act sooner, baits anti-airs that expect you to stay airborne.",
+      "loses_to": "predictable landing spot."
+    },
+    "Fireball": {
+      "category": "special",
+      "range": "fullscreen",
+      "summary": "Shuriken — thrown projectile, aimable direction.",
+      "beats": "safe chip at range, controls space",
+      "loses_to": "low damage, can be jumped over"
+    },
+    "ForwardDashFollowup": {
+      "category": "attack",
+      "summary": "Follow-up attack after a forward dash. Good for closing distance and attacking.",
+      "beats": "blocking opponents at mid range",
+      "loses_to": "punishable on block if predicted"
+    },
+    "Getup": {
+      "category": "utility",
+      "summary": "Wake up from knockdown."
+    },
+    "Grab": {
+      "category": "grab",
+      "summary": "Throw — beats blocking, loses to attacks. h_reach ~50 units. Must be close to opponent to connect. If opponent is out of range, close distance first with DashForward or Dash.",
+      "beats": "blocking opponents (grabs go through block).",
+      "loses_to": "loses to attacks (any attack beats grab), very short range (~50 units). Will whiff if opponent is further than 50 units."
+    },
+    "GrapplingHook": {
+      "category": "special",
+      "range": "far",
+      "summary": "Grappling Hook — mobility/pull tool. Aim direction payload.",
+      "beats": "repositions, closes distance from afar",
+      "loses_to": "does no damage, vulnerable during animation"
+    },
+    "GroundedKick": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Basic kick — moderate damage.",
+      "beats": "grounded opponents at close range",
+      "loses_to": "loses to blocking"
+    },
+    "GroundedPunch": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Basic punch — fast, low damage. Good combo starter.",
+      "beats": "beats grabs, fast pressure",
+      "loses_to": "low damage, short range"
+    },
+    "GroundedSweep": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Sweep — hits low, high damage.",
+      "beats": "opponents blocking high, good knockdown",
+      "loses_to": "loses to jumping, punishable on block"
+    },
+    "HitGrab": {
+      "category": "grab",
+      "range": "close",
+      "summary": "Skull Shaker — hit-grab that causes bleed damage over time.",
+      "beats": "opponents who block (hit-grab bypasses block)",
+      "loses_to": "short range, loses to fast attacks"
+    },
+    "InstantCancel": {
+      "category": "utility",
+      "summary": "Cancel current move animation instantly. Costs meter."
+    },
+    "IzunaDrop": {
+      "category": "grab",
+      "range": "close",
+      "summary": "Izuna Drop — high-damage aerial command grab.",
+      "beats": "airborne blocking opponents",
+      "loses_to": "very slow, loses to air attacks",
+      "risk": "high"
+    },
+    "Jump": {
+      "category": "movement",
+      "summary": "Jump — become airborne. JumpArc payload controls trajectory (x: horizontal direction, y: height). Startup 2-5 ticks. Short jumps actionable in ~10 ticks, high jumps ~15. Avoids grabs and ground attacks. Enables aerial attacks on landing.",
+      "beats": "avoids ALL grabs and ground-only attacks. Repositions vertically. Use to approach over projectiles or escape grab pressure.",
+      "loses_to": "predictable landing trajectory, vulnerable to anti-airs (UpwardSwipe). Aerial blocking is weaker than ground blocking (+2 block disadvantage)."
+    },
+    "JumpKick": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Jump Kick — jumping kick attack.",
+      "beats": "opponents on the ground from air approach",
+      "loses_to": "predictable trajectory, loses to anti-airs"
+    },
+    "NunChukHeavy": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Chuk Heavy — nunchuk heavy multi-hit.",
+      "beats": "chip damage through block",
+      "loses_to": "short range, slower than light version"
+    },
+    "NunChukJump": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Jump nunchuk — aerial follow-up available."
+    },
+    "NunChukLight": {
+      "category": "attack",
+      "range": "close",
+      "summary": "NunChuk — multi-hit nunchuk light attack.",
+      "beats": "close-range pressure, beats grabs",
+      "loses_to": "short range, loses to blocking at distance"
+    },
+    "NunChukSpin": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Aerial spinning nunchuk."
+    },
+    "OffensiveBurst": {
+      "category": "attack",
+      "summary": "Burst Cancel — cancel current attack into pressure. Costs burst.",
+      "beats": "extends combos, creates mixups",
+      "loses_to": "costs burst stock, wasted if not in an attack"
+    },
+    "PalmStrike": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Palm Strike — very high damage, momentum-boosted. Ninja's biggest punish.",
+      "beats": "massive damage on hit, best punish tool",
+      "loses_to": "short range, loses to blocking, high commitment"
+    },
+    "ParryAfterWhiff": {
+      "category": "defense",
+      "summary": "Block after a whiffed attack. Same as ParryHigh but in recovery.",
+      "beats": "attacks after your whiff",
+      "loses_to": "loses to grabs"
+    },
+    "ParryHigh": {
+      "category": "defense",
+      "summary": "Block high/mid attacks. Parry timing count sets active parry frames (1-20).",
+      "beats": "attacks, projectiles",
+      "loses_to": "loses to grabs, does no damage"
+    },
+    "ParrySuper": {
+      "category": "defense",
+      "summary": "Push Block — costs meter, creates distance on block.",
+      "beats": "attacks, creates space",
+      "loses_to": "costs meter, loses to grabs"
+    },
+    "QuickSlash": {
+      "category": "super",
+      "range": "mid",
+      "summary": "Quick Slash — super multi-hit slash, 12 hits. Costs meter.",
+      "beats": "massive damage, fast startup for a super",
+      "loses_to": "costs meter, punishable if blocked"
+    },
+    "QuickSlashAir": {
+      "category": "super",
+      "range": "mid",
+      "summary": "Aerial Quick Slash."
+    },
+    "Roll": {
+      "category": "defense",
+      "summary": "Dodge — invincible roll. Has invincibility frames that avoid all attacks. Good for escaping pressure or dodging predictable attacks. Direction is usually fixed.",
+      "beats": "attacks (invincible frames), projectiles, repositions while safe.",
+      "loses_to": "vulnerable after invincibility ends, loses to delayed attacks and grabs."
+    },
+    "SlideKick": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Slide Kick — slides along ground ~120 units. Effective range ~150 units. Goes under projectiles.",
+      "beats": "projectiles (slides under), standing opponents",
+      "loses_to": "loses to blocking low, punishable on block"
+    },
+    "SlideKickAir": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Aerial Slide Kick — slides forward ~120 units from air."
+    },
+    "SpotDodge": {
+      "category": "defense",
+      "summary": "Spot Dodge — stationary invincible dodge. Grab invulnerable frames 1-4, fully invulnerable frames 5-7, actionable at frame 11. Beats both attacks and grabs briefly. Very fast recovery allows punishing after dodging.",
+      "beats": "avoids attacks AND grabs without moving. Fast recovery (11 ticks) lets you punish after dodging.",
+      "loses_to": "loses to attacks that hit after frame 7 (delayed attacks, multi-hit moves). Short invulnerability window."
+    },
+    "StickyBomb": {
+      "category": "special",
+      "range": "mid",
+      "summary": "Deploy Sticky Bomb — can be detonated later. Max 3 on field.",
+      "beats": "area denial, detonates for damage later",
+      "loses_to": "delayed payoff, costs a turn to place"
+    },
+    "StickyBombThrow": {
+      "category": "special",
+      "range": "far",
+      "summary": "Throw Sticky Bomb directly at opponent."
+    },
+    "Stomp": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Stomp — overhead stomp attack.",
+      "beats": "opponents below you",
+      "loses_to": "very slow, easily blocked or avoided",
+      "risk": "medium"
+    },
+    "StoreMomentum": {
+      "category": "super",
+      "summary": "Store current velocity for later release burst.",
+      "beats": "stores speed for explosive later movement",
+      "loses_to": "costs meter, no immediate effect"
+    },
+    "Substitution": {
+      "category": "defense",
+      "summary": "Substitution — ninja teleport escape. Instant invincibility.",
+      "beats": "escapes any attack or combo",
+      "loses_to": "limited uses, does no damage"
+    },
+    "Summon": {
+      "category": "special",
+      "range": "mid",
+      "summary": "Summon kunai/additional projectile."
+    },
+    "SuperJump": {
+      "category": "movement",
+      "summary": "Super Jump — high/far jump covering more distance than normal jump. JumpArc payload controls arc. Startup 5 ticks. Covers large horizontal and vertical distance. Use for big repositioning or escaping corner pressure.",
+      "beats": "escapes pressure, covers large distance, avoids grabs and ground attacks.",
+      "loses_to": "longer airtime makes landing predictable. Vulnerable to anti-airs."
+    },
+    "Taunt": {
+      "category": "utility",
+      "summary": "Hustle/taunt — builds meter but leaves you vulnerable.",
+      "beats": "builds meter at safe range",
+      "loses_to": "fully vulnerable during animation, punishable at any range"
+    },
+    "TechRoll": {
+      "category": "defense",
+      "summary": "Tech Dodge — invincible roll on knockdown. Use when knocked down to escape wakeup pressure. Repositions while invincible.",
+      "beats": "avoids wakeup pressure (meaties, grabs on your wakeup).",
+      "loses_to": "direction is predictable, opponent can read and chase."
+    },
+    "Uppercut": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Uppercut — rising launcher, huge damage.",
+      "beats": "opponents at close range, launches for air combos",
+      "loses_to": "short range, very punishable on whiff"
+    },
+    "UppercutAir": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Aerial Uppercut."
+    },
+    "Wait": {
+      "category": "utility",
+      "summary": "Do nothing this turn. Low commitment, preserves options.",
+      "beats": "nothing directly, but avoids overcommitting",
+      "loses_to": "gives up initiative, opponent acts freely"
+    },
+    "WhiffInstantCancel": {
+      "category": "utility",
+      "summary": "Cancel a whiffed move. Costs meter."
+    },
+    "WhipWave": {
+      "category": "special",
+      "range": "far",
+      "summary": "Whip Wave — ground projectile.",
+      "beats": "grounded opponents at range",
+      "loses_to": "loses to jumping"
+    }
+  }
+}

@@ -1,0 +1,336 @@
+{
+  "format": "budok.character.v1",
+  "character": "Mutant",
+  "provenance": {
+    "by": "budok maintainers",
+    "source": "curated move catalog and character guides from budok-ai"
+  },
+  "summary": {
+    "archetype": "aggressive rushdown",
+    "game_plan": "Mutant is an aggressive rushdown character with acid damage-over-time.",
+    "tips": [
+      "Getting in: AcidSlashJ (Leap Slash, travels ~150 units, 10-hit), DashThroughAttack (Sneak Attack, dashes through opponent), WallTrick (Pounce, ~200 units). Also use Dash/Walk Forward — Mutant NEEDS to be close.",
+      "At close range (<60 units): Swipe (h_reach 44, fast), Sweep (49, knockdown), BiteGrab (40, applies poison DoT — grabs beat blocking). Mix Swipe/Grab unpredictably.",
+      "At range: CausticSpike (250, acid projectile). Use to force opponent to approach.",
+      "Key strategy: Apply acid with AcidSlashH/BiteGrab, then stay aggressive. Acid DoT does damage over time so pressure counts. GroundToAirSpin (Shred, 9 hits) for big damage.",
+      "Movement is essential. Most Mutant attacks are short range. If >60 units away, close distance before attacking. Don't throw Swipe at 150 units — it will whiff.",
+      "Mutant is NOT a defensive character. Blocking wastes your speed advantage."
+    ]
+  },
+  "moves": {
+    "AcidSlashH": {
+      "category": "special",
+      "range": "mid",
+      "summary": "Horizontal Acid Slash — acid-coated slash, applies acid DoT.",
+      "beats": "applies damage over time on hit",
+      "loses_to": "loses to blocking"
+    },
+    "AcidSlashJ": {
+      "category": "special",
+      "range": "far",
+      "summary": "Leap Slash — leaping acid slash covering ~150 units, 10-hit. Effective range ~200 units. Great approach tool but committed.",
+      "beats": "covers distance while attacking, multi-hit",
+      "loses_to": "committed, punishable on block",
+      "risk": "medium"
+    },
+    "AcidSlashV": {
+      "category": "special",
+      "range": "mid",
+      "summary": "Vertical Acid Slash — aerial acid slash."
+    },
+    "AirGrab": {
+      "category": "grab",
+      "summary": "Aerial throw — air-to-air grab option.",
+      "beats": "airborne blocking opponents",
+      "loses_to": "loses to air attacks, requires both players airborne"
+    },
+    "AirKick": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Aerial Kick."
+    },
+    "AirSpin": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Aerial Shred — multi-hit aerial spin (6 hits)."
+    },
+    "AirSwipe": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Aerial Swipe — fast air attack."
+    },
+    "BiteGrab": {
+      "category": "grab",
+      "range": "close",
+      "summary": "Envenom — poison bite grab, applies damage over time.",
+      "beats": "blocking opponents, poison DoT adds extra damage",
+      "loses_to": "very slow, loses to any attack",
+      "risk": "medium"
+    },
+    "CausticBarrage": {
+      "category": "super",
+      "range": "far",
+      "summary": "Caustic Barrage — acid barrage super. Costs meter.",
+      "beats": "massive ranged damage",
+      "loses_to": "costs meter, dodgeable"
+    },
+    "CausticBarrageAir": {
+      "category": "super",
+      "range": "far",
+      "summary": "Aerial Caustic Barrage."
+    },
+    "CausticSpike": {
+      "category": "special",
+      "range": "far",
+      "summary": "Caustic Spike — acid projectile. Direction payload.",
+      "beats": "zoning at range",
+      "loses_to": "slow, can be jumped over"
+    },
+    "ChargeDash": {
+      "category": "movement",
+      "summary": "Super Dash — armored dash forward, covers large distance. Startup 8 ticks, actionable after ~22 ticks. Goes through single-hit attacks. Best option for closing large distances (200+ units).",
+      "beats": "goes through single-hit attacks (armor), covers the most ground of any movement. Use when FAR from opponent to close the gap.",
+      "loses_to": "8 tick startup (slow), loses to grabs and multi-hit moves. Punishable if predicted."
+    },
+    "Continue": {
+      "category": "utility",
+      "summary": "Continue current action/state."
+    },
+    "Dash": {
+      "category": "movement",
+      "summary": "Dash — quick forward hop. Startup 1 tick (fastest movement option), actionable after ~10 ticks. Projectile invulnerable frames 0-4, hops over low attacks. Use to close distance quickly or dodge projectiles.",
+      "beats": "projectiles (invuln frames 0-4), low attacks (hops over). Fastest way to close distance.",
+      "loses_to": "short distance covered, loses to well-timed attacks."
+    },
+    "DashBackward": {
+      "category": "movement",
+      "summary": "Walk Back — retreat from opponent. Startup 2 ticks, actionable after ~11 ticks. Grab immune frames 1-7. Becomes inactionable if opponent uses forward movement.",
+      "beats": "escapes close-range pressure, grab immune early frames. Creates space for zoning.",
+      "loses_to": "gives up stage position, can get cornered at stage edge. Inactionable if opponent dashes forward."
+    },
+    "DashForward": {
+      "category": "movement",
+      "summary": "Walk Forward — close distance toward opponent. Distance payload (0-100) controls how far. Startup 2 ticks, actionable after ~10-15 ticks. Essential for getting into attack range when your moves can't reach.",
+      "beats": "closes gap so your attacks can connect. Use when OUT OF RANGE for melee attacks. Walk into attack range, THEN attack next turn.",
+      "loses_to": "vulnerable during movement, predictable if repeated. Opponent can anti-air or attack your approach."
+    },
+    "DashThroughAttack": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Sneak Attack — dashes through opponent and attacks. Covers ~150 units. Crosses up, confuses blocking direction.",
+      "beats": "crosses up, confuses blocking direction",
+      "loses_to": "predictable if overused, loses to fast reactions"
+    },
+    "DefensiveBurst": {
+      "category": "defense",
+      "summary": "Burst — invincible reversal, costs burst stock. Emergency escape.",
+      "beats": "escapes combos and pressure",
+      "loses_to": "limited stock (usually 1-2 per match), huge loss if baited"
+    },
+    "DoubleJump": {
+      "category": "movement",
+      "summary": "Double Jump — second jump while airborne. Changes your air trajectory. Use to extend airtime, dodge anti-airs, or reposition in the air.",
+      "beats": "dodges anti-airs by changing trajectory, extends air control.",
+      "loses_to": "uses your air action, can't double jump again."
+    },
+    "Fall": {
+      "category": "movement",
+      "summary": "Fall — drop from the air quickly. Use to land faster and become actionable sooner instead of floating. Good after a whiffed air attack or to bait anti-airs.",
+      "beats": "lands quickly to act sooner, baits anti-airs that expect you to stay airborne.",
+      "loses_to": "predictable landing spot."
+    },
+    "ForwardDashFollowup": {
+      "category": "attack",
+      "summary": "Follow-up attack after a forward dash. Good for closing distance and attacking.",
+      "beats": "blocking opponents at mid range",
+      "loses_to": "punishable on block if predicted"
+    },
+    "Getup": {
+      "category": "utility",
+      "summary": "Wake up from knockdown."
+    },
+    "Grab": {
+      "category": "grab",
+      "summary": "Throw — beats blocking, loses to attacks. h_reach ~50 units. Must be close to opponent to connect. If opponent is out of range, close distance first with DashForward or Dash.",
+      "beats": "blocking opponents (grabs go through block).",
+      "loses_to": "loses to attacks (any attack beats grab), very short range (~50 units). Will whiff if opponent is further than 50 units."
+    },
+    "GroundToAirSpin": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Shred — multi-hit spinning attack (9 hits), ground-to-air.",
+      "beats": "massive damage if it connects, multi-hit pressure",
+      "loses_to": "short range, punishable if blocked",
+      "risk": "medium"
+    },
+    "InstantCancel": {
+      "category": "utility",
+      "summary": "Cancel current move animation instantly. Costs meter."
+    },
+    "JukeCharge": {
+      "category": "super",
+      "summary": "Howl — charges juke pips (defense resource). Costs meter.",
+      "beats": "builds defense resource for dodges",
+      "loses_to": "costs meter, does no damage"
+    },
+    "Jump": {
+      "category": "movement",
+      "summary": "Jump — become airborne. JumpArc payload controls trajectory (x: horizontal direction, y: height). Startup 2-5 ticks. Short jumps actionable in ~10 ticks, high jumps ~15. Avoids grabs and ground attacks. Enables aerial attacks on landing.",
+      "beats": "avoids ALL grabs and ground-only attacks. Repositions vertically. Use to approach over projectiles or escape grab pressure.",
+      "loses_to": "predictable landing trajectory, vulnerable to anti-airs (UpwardSwipe). Aerial blocking is weaker than ground blocking (+2 block disadvantage)."
+    },
+    "Kick": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Kick — strong kick."
+    },
+    "OffensiveBurst": {
+      "category": "attack",
+      "summary": "Burst Cancel — cancel current attack into pressure. Costs burst.",
+      "beats": "extends combos, creates mixups",
+      "loses_to": "costs burst stock, wasted if not in an attack"
+    },
+    "OverheadClaw": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Overhead Claw — overhead attack, hits high.",
+      "beats": "opponents blocking low",
+      "loses_to": "loses to standing block"
+    },
+    "ParryAfterWhiff": {
+      "category": "defense",
+      "summary": "Block after a whiffed attack. Same as ParryHigh but in recovery.",
+      "beats": "attacks after your whiff",
+      "loses_to": "loses to grabs"
+    },
+    "ParryHigh": {
+      "category": "defense",
+      "summary": "Block high/mid attacks. Parry timing count sets active parry frames (1-20).",
+      "beats": "attacks, projectiles",
+      "loses_to": "loses to grabs, does no damage"
+    },
+    "ParrySuper": {
+      "category": "defense",
+      "summary": "Push Block — costs meter, creates distance on block.",
+      "beats": "attacks, creates space",
+      "loses_to": "costs meter, loses to grabs"
+    },
+    "ProjectileGrab": {
+      "category": "special",
+      "range": "mid",
+      "summary": "Vault — aerial grab that goes over projectiles.",
+      "beats": "beats projectiles, aerial grab",
+      "loses_to": "loses to anti-airs"
+    },
+    "Rebirth": {
+      "category": "super",
+      "range": "close",
+      "summary": "Rebirth — revival/comeback super, very high damage. Costs meter.",
+      "beats": "massive damage comeback tool",
+      "loses_to": "extremely slow, short range, costs meter"
+    },
+    "Roll": {
+      "category": "defense",
+      "summary": "Dodge — invincible roll. Has invincibility frames that avoid all attacks. Good for escaping pressure or dodging predictable attacks. Direction is usually fixed.",
+      "beats": "attacks (invincible frames), projectiles, repositions while safe.",
+      "loses_to": "vulnerable after invincibility ends, loses to delayed attacks and grabs."
+    },
+    "Shockwave": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Shockwave — ground shockwave, 2-hit.",
+      "beats": "grounded opponents at range",
+      "loses_to": "loses to jumping"
+    },
+    "Slash": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Slash — strong claw slash. Solid mid-range option.",
+      "beats": "grounded opponents at mid range",
+      "loses_to": "loses to blocking, moderate commitment"
+    },
+    "SpotDodge": {
+      "category": "defense",
+      "summary": "Spot Dodge — stationary invincible dodge. Grab invulnerable frames 1-4, fully invulnerable frames 5-7, actionable at frame 11. Beats both attacks and grabs briefly. Very fast recovery allows punishing after dodging.",
+      "beats": "avoids attacks AND grabs without moving. Fast recovery (11 ticks) lets you punish after dodging.",
+      "loses_to": "loses to attacks that hit after frame 7 (delayed attacks, multi-hit moves). Short invulnerability window."
+    },
+    "SuperJump": {
+      "category": "movement",
+      "summary": "Super Jump — high/far jump covering more distance than normal jump. JumpArc payload controls arc. Startup 5 ticks. Covers large horizontal and vertical distance. Use for big repositioning or escaping corner pressure.",
+      "beats": "escapes pressure, covers large distance, avoids grabs and ground attacks.",
+      "loses_to": "longer airtime makes landing predictable. Vulnerable to anti-airs."
+    },
+    "Sweep": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Sweep — high damage sweep attack. Knockdown on hit.",
+      "beats": "opponents standing or blocking high, causes knockdown",
+      "loses_to": "loses to jumping, punishable on block"
+    },
+    "Swipe": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Swipe — basic claw swipe. Fast and reliable.",
+      "beats": "beats grabs, fast pressure",
+      "loses_to": "short range"
+    },
+    "Swipe2": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Swipe variant — alternate claw attack.",
+      "beats": "mixes up attack timing",
+      "loses_to": "short range"
+    },
+    "SwipeDown": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Low Swipe — low sweeping claw. Hits low.",
+      "beats": "opponents blocking high",
+      "loses_to": "short range, loses to jumping"
+    },
+    "SwipeUp": {
+      "category": "attack",
+      "range": "close",
+      "summary": "Upward Swipe — anti-air claw. Use when opponent is airborne.",
+      "beats": "airborne opponents",
+      "loses_to": "whiffs vs grounded opponents at distance"
+    },
+    "Taunt": {
+      "category": "utility",
+      "summary": "Hustle/taunt — builds meter but leaves you vulnerable.",
+      "beats": "builds meter at safe range",
+      "loses_to": "fully vulnerable during animation, punishable at any range"
+    },
+    "TechRoll": {
+      "category": "defense",
+      "summary": "Tech Dodge — invincible roll on knockdown. Use when knocked down to escape wakeup pressure. Repositions while invincible.",
+      "beats": "avoids wakeup pressure (meaties, grabs on your wakeup).",
+      "loses_to": "direction is predictable, opponent can read and chase."
+    },
+    "TwistAttack": {
+      "category": "special",
+      "range": "mid",
+      "summary": "Corkscrew — spinning multi-hit attack. Direction payload.",
+      "beats": "multi-hit approach",
+      "loses_to": "punishable if blocked"
+    },
+    "Wait": {
+      "category": "utility",
+      "summary": "Do nothing this turn. Low commitment, preserves options.",
+      "beats": "nothing directly, but avoids overcommitting",
+      "loses_to": "gives up initiative, opponent acts freely"
+    },
+    "WallTrick": {
+      "category": "special",
+      "range": "far",
+      "summary": "Pounce — wall pounce attack covering ~200 units, 7-hit combo potential. Requires wall nearby.",
+      "beats": "fast approach from range, multi-hit",
+      "loses_to": "requires wall nearby, punishable if read"
+    },
+    "WhiffInstantCancel": {
+      "category": "utility",
+      "summary": "Cancel a whiffed move. Costs meter."
+    }
+  }
+}

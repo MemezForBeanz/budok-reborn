@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=2]
+
+[ext_resource path="res://budok_test_char/TesterExtra.gd" type="Script" id=1]
+
+[node name="TesterExtra" type="HBoxContainer"]
+script = ExtResource( 1 )
+
+[node name="ChargeButton" type="CheckButton" parent="."]
+text = "Charge"

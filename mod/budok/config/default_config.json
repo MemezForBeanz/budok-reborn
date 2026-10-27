@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "mcp": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8765,
+    "auth_token": "",
+    "require_token": true,
+    "allowed_origins": [],
+    "max_wait_s": 25
+  },
+  "controllers": {
+    "p1": "human",
+    "p2": "mcp"
+  },
+  "turns": {
+    "forced_turns": "skip_unless_hurt",
+    "timeout_s": {"mcp": 0, "ai": 120},
+    "fallback_action": "Continue",
+    "hide_bot_panel": true,
+    "history_length": 12
+  },
+  "ai": {
+    "providers": {
+      "anthropic": {"api_key": "", "api_key_env": "ANTHROPIC_API_KEY", "base_url": "https://api.anthropic.com"},
+      "openai": {"api_key": "", "api_key_env": "OPENAI_API_KEY", "base_url": "https://api.openai.com/v1"},
+      "openrouter": {"api_key": "", "api_key_env": "OPENROUTER_API_KEY", "base_url": "https://openrouter.ai/api/v1"},
+      "local": {"api_key": "", "api_key_env": "", "base_url": "http://127.0.0.1:11434/v1"}
+    },
+    "play": {
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "effort": "low",
+      "max_tokens": 16000,
+      "temperature": null,
+      "request_timeout_s": 180,
+      "max_steps": 6,
+      "allow_simulation": true,
+      "max_simulations": 3,
+      "memory_turns": 6,
+      "style": "",
+      "risk": "balanced",
+      "refusal_fallback": true,
+      "extra_body": {}
+    },
+    "annotate": {
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "max_tokens": 16000,
+      "temperature": null,
+      "request_timeout_s": 300,
+      "max_steps": 30,
+      "batch_size": 10,
+      "include_source": true,
+      "max_source_chars": 6000,
+      "auto_generate_missing": false,
+      "refusal_fallback": true,
+      "extra_body": {}
+    }
+  },
+  "simulation": {
+    "enabled": true,
+    "max_ticks": 120
+  },
+  "schemas": {
+    "registry_enabled": false,
+    "registry_url": ""
+  },
+  "source_access": {
+    "enabled": true,
+    "max_file_bytes": 200000
+  },
+  "automation": {
+    "script": ""
+  },
+  "ui": {
+    "toggle_key": "F8",
+    "show_on_start": false
+  },
+  "logging": {
+    "verbose": false,
+    "match_logs": true
+  }
+}

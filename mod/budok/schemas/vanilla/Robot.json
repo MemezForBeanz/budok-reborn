@@ -1,0 +1,381 @@
+{
+  "format": "budok.character.v1",
+  "character": "Robot",
+  "provenance": {
+    "by": "budok maintainers",
+    "source": "curated move catalog and character guides from budok-ai"
+  },
+  "summary": {
+    "archetype": "grappler/heavyweight",
+    "game_plan": "Robot is a grappler/heavyweight — your goal is to get close and land devastating command grabs and heavy attacks.",
+    "tips": [
+      "Closing distance is CRITICAL. Most Robot attacks have short range. Use Walk Forward, Dash, and Super Dash (armored — goes through single-hit attacks) to get in.",
+      "At close range: Vacuum (h_reach 140 — Robot's best grab, great range for a grab), Slap (85, fast poke), Blast (54, safe). Mix grabs with attacks.",
+      "At range: EyeBeam (h_reach 80-200, long range), Missile/LOIC (fullscreen supers). Use these to force the opponent to approach you.",
+      "Robot's attacks are slow but hit HARD. Jump to approach over projectiles."
+    ]
+  },
+  "moves": {
+    "AirGrab": {
+      "category": "grab",
+      "summary": "Aerial throw — air-to-air grab option.",
+      "beats": "airborne blocking opponents",
+      "loses_to": "loses to air attacks, requires both players airborne"
+    },
+    "AirKick": {
+      "category": "attack",
+      "range": "close",
+      "summary": "BOOT — aerial boot kick."
+    },
+    "Blast": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "CONCUSSIVE BLAST — 2-hit blast, good poke.",
+      "beats": "safe mid-range poke",
+      "loses_to": "moderate damage"
+    },
+    "Chainsaw": {
+      "category": "attack",
+      "range": "close",
+      "summary": "CHAIN SAW — multi-tick sustained damage. High commitment.",
+      "beats": "huge damage if it connects at close range",
+      "loses_to": "extremely slow, short range, easily avoided"
+    },
+    "ChargeDash": {
+      "category": "movement",
+      "summary": "Super Dash — armored dash forward, covers large distance. Startup 8 ticks, actionable after ~22 ticks. Goes through single-hit attacks. Best option for closing large distances (200+ units).",
+      "beats": "goes through single-hit attacks (armor), covers the most ground of any movement. Use when FAR from opponent to close the gap.",
+      "loses_to": "8 tick startup (slow), loses to grabs and multi-hit moves. Punishable if predicted."
+    },
+    "ClapJump": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "THUNDER CLAP — thunder clap jump, good anti-air.",
+      "beats": "airborne opponents, rising attack",
+      "loses_to": "punishable on whiff"
+    },
+    "CommandGrab": {
+      "category": "grab",
+      "range": "close",
+      "summary": "COMMAND: GRAB — command grab, beats blocking.",
+      "beats": "blocking opponents at close range",
+      "loses_to": "very slow, loses to attacks and jumps",
+      "risk": "medium"
+    },
+    "Continue": {
+      "category": "utility",
+      "summary": "Continue current action/state."
+    },
+    "CornerCarryHitGrab": {
+      "category": "grab",
+      "range": "close",
+      "summary": "BOUNDS CHECK — corner carry hit-grab. Pushes opponent to corner.",
+      "beats": "positions opponent in corner",
+      "loses_to": "short range"
+    },
+    "CornerCarryHitGrabAir": {
+      "category": "grab",
+      "range": "close",
+      "summary": "Aerial BOUNDS CHECK."
+    },
+    "Dash": {
+      "category": "movement",
+      "summary": "Dash — quick forward hop. Startup 1 tick (fastest movement option), actionable after ~10 ticks. Projectile invulnerable frames 0-4, hops over low attacks. Use to close distance quickly or dodge projectiles.",
+      "beats": "projectiles (invuln frames 0-4), low attacks (hops over). Fastest way to close distance.",
+      "loses_to": "short distance covered, loses to well-timed attacks."
+    },
+    "DashBackward": {
+      "category": "movement",
+      "summary": "Walk Back — retreat from opponent. Startup 2 ticks, actionable after ~11 ticks. Grab immune frames 1-7. Becomes inactionable if opponent uses forward movement.",
+      "beats": "escapes close-range pressure, grab immune early frames. Creates space for zoning.",
+      "loses_to": "gives up stage position, can get cornered at stage edge. Inactionable if opponent dashes forward."
+    },
+    "DashForward": {
+      "category": "movement",
+      "summary": "Walk Forward — close distance toward opponent. Distance payload (0-100) controls how far. Startup 2 ticks, actionable after ~10-15 ticks. Essential for getting into attack range when your moves can't reach.",
+      "beats": "closes gap so your attacks can connect. Use when OUT OF RANGE for melee attacks. Walk into attack range, THEN attack next turn.",
+      "loses_to": "vulnerable during movement, predictable if repeated. Opponent can anti-air or attack your approach."
+    },
+    "DefensiveBurst": {
+      "category": "defense",
+      "summary": "Burst — invincible reversal, costs burst stock. Emergency escape.",
+      "beats": "escapes combos and pressure",
+      "loses_to": "limited stock (usually 1-2 per match), huge loss if baited"
+    },
+    "DisableLoic": {
+      "category": "super",
+      "summary": "SHUTDOWN — cancel active LOIC."
+    },
+    "DisembowelHitGrab": {
+      "category": "grab",
+      "range": "close",
+      "summary": "TRY-CATCH — hit-grab special.",
+      "beats": "catches blocking opponents",
+      "loses_to": "slow startup, loses to fast attacks"
+    },
+    "DisembowelHitGrabNeutral": {
+      "category": "grab",
+      "range": "close",
+      "summary": "TRY-CATCH neutral variant."
+    },
+    "DoubleJump": {
+      "category": "movement",
+      "summary": "Double Jump — second jump while airborne. Changes your air trajectory. Use to extend airtime, dodge anti-airs, or reposition in the air.",
+      "beats": "dodges anti-airs by changing trajectory, extends air control.",
+      "loses_to": "uses your air action, can't double jump again."
+    },
+    "Drive": {
+      "category": "special",
+      "summary": "DRIVE — enter motorcycle Drive mode. Unlocks DriveJump, DriveDrift, DriveWheelie, DriveWheelieGrab.",
+      "beats": "unlocks fast mobile attacks",
+      "loses_to": "costs a turn to enter stance",
+      "combo_hint": "Unlocks: DriveJump, DriveDrift, DriveWheelie, DriveWheelieGrab, DriveBoost"
+    },
+    "DriveBoost": {
+      "category": "super",
+      "summary": "BOOST — Drive mode boost super. Requires Drive stance."
+    },
+    "DriveDrift": {
+      "category": "attack",
+      "summary": "DRIFT — Drive mode drift attack. Requires Drive stance.",
+      "beats": "fast repositioning attack in Drive mode",
+      "loses_to": "requires Drive stance setup"
+    },
+    "DriveJump": {
+      "category": "attack",
+      "summary": "JUMPSTART — Drive mode jump attack. Requires Drive stance."
+    },
+    "DriveWheelie": {
+      "category": "attack",
+      "summary": "WHEELIE — Drive mode wheelie, 3-hit. Requires Drive stance."
+    },
+    "DriveWheelieGrab": {
+      "category": "grab",
+      "summary": "CLUTCH — Drive mode grab. Requires Drive stance."
+    },
+    "EyeBeam": {
+      "category": "attack",
+      "range": "far",
+      "summary": "OPTICAL BEAM — multi-hit eye laser. Great at range.",
+      "beats": "opponents at range, multi-hit chips through block",
+      "loses_to": "slow startup, punishable at close range"
+    },
+    "EyeBeamAir": {
+      "category": "attack",
+      "range": "far",
+      "summary": "Aerial OPTICAL BEAM."
+    },
+    "Fall": {
+      "category": "movement",
+      "summary": "Fall — drop from the air quickly. Use to land faster and become actionable sooner instead of floating. Good after a whiffed air attack or to bait anti-airs.",
+      "beats": "lands quickly to act sooner, baits anti-airs that expect you to stay airborne.",
+      "loses_to": "predictable landing spot."
+    },
+    "Flamethrower": {
+      "category": "special",
+      "range": "mid",
+      "summary": "FLAME THROWER — multi-hit fire. Good pressure.",
+      "beats": "chips through block, multi-hit pressure",
+      "loses_to": "loses to invincible moves, predictable"
+    },
+    "Flamethrower2": {
+      "category": "super",
+      "range": "mid",
+      "summary": "Super FLAME THROWER. Costs meter."
+    },
+    "ForwardDashFollowup": {
+      "category": "attack",
+      "summary": "Follow-up attack after a forward dash. Good for closing distance and attacking.",
+      "beats": "blocking opponents at mid range",
+      "loses_to": "punishable on block if predicted"
+    },
+    "Getup": {
+      "category": "utility",
+      "summary": "Wake up from knockdown."
+    },
+    "Grab": {
+      "category": "grab",
+      "summary": "Throw — beats blocking, loses to attacks. h_reach ~50 units. Must be close to opponent to connect. If opponent is out of range, close distance first with DashForward or Dash.",
+      "beats": "blocking opponents (grabs go through block).",
+      "loses_to": "loses to attacks (any attack beats grab), very short range (~50 units). Will whiff if opponent is further than 50 units."
+    },
+    "Grenade": {
+      "category": "special",
+      "range": "far",
+      "summary": "REMOTE BOMB — remote detonation bomb. Place and detonate later.",
+      "beats": "area denial, detonates on command",
+      "loses_to": "delayed, can be avoided"
+    },
+    "GroundPound": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "EARTHQUAKE — ground pound stomp.",
+      "beats": "grounded opponents nearby",
+      "loses_to": "very slow, easily jumped",
+      "risk": "high"
+    },
+    "InstantCancel": {
+      "category": "utility",
+      "summary": "Cancel current move animation instantly. Costs meter."
+    },
+    "Jump": {
+      "category": "movement",
+      "summary": "Jump — become airborne. JumpArc payload controls trajectory (x: horizontal direction, y: height). Startup 2-5 ticks. Short jumps actionable in ~10 ticks, high jumps ~15. Avoids grabs and ground attacks. Enables aerial attacks on landing.",
+      "beats": "avoids ALL grabs and ground-only attacks. Repositions vertically. Use to approach over projectiles or escape grab pressure.",
+      "loses_to": "predictable landing trajectory, vulnerable to anti-airs (UpwardSwipe). Aerial blocking is weaker than ground blocking (+2 block disadvantage)."
+    },
+    "KillProcess": {
+      "category": "super",
+      "range": "close",
+      "summary": "KILL PROCESS — devastating super, 400 damage. Costs meter.",
+      "beats": "one-shot kill potential at close range",
+      "loses_to": "extremely slow, short range, huge meter cost"
+    },
+    "LOIC": {
+      "category": "super",
+      "range": "fullscreen",
+      "summary": "LOIC — orbital strike. Delay payload controls targeting. Costs meter.",
+      "beats": "unavoidable at certain timings, fullscreen damage",
+      "loses_to": "slow, costs meter, delay makes it readable",
+      "risk": "high"
+    },
+    "Lariat": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "SPIN CYCLE — spinning lariat, multi-hit.",
+      "beats": "close-range pressure, multi-hit",
+      "loses_to": "low damage per hit"
+    },
+    "Magnetize": {
+      "category": "special",
+      "range": "mid",
+      "summary": "MAGNETIZE — magnetize opponent/projectile. Pulls things toward Robot.",
+      "beats": "pulls opponents in for grabs/attacks",
+      "loses_to": "does no damage directly"
+    },
+    "Missile": {
+      "category": "super",
+      "range": "fullscreen",
+      "summary": "LAUNCH — missile launch. Costs meter.",
+      "beats": "fullscreen damage, good at range",
+      "loses_to": "costs meter, can be dodged"
+    },
+    "OffensiveBurst": {
+      "category": "attack",
+      "summary": "Burst Cancel — cancel current attack into pressure. Costs burst.",
+      "beats": "extends combos, creates mixups",
+      "loses_to": "costs burst stock, wasted if not in an attack"
+    },
+    "OverflowGrab": {
+      "category": "grab",
+      "range": "close",
+      "summary": "OVERFLOW — aerial grab."
+    },
+    "ParryAfterWhiff": {
+      "category": "defense",
+      "summary": "Block after a whiffed attack. Same as ParryHigh but in recovery.",
+      "beats": "attacks after your whiff",
+      "loses_to": "loses to grabs"
+    },
+    "ParryHigh": {
+      "category": "defense",
+      "summary": "Block high/mid attacks. Parry timing count sets active parry frames (1-20).",
+      "beats": "attacks, projectiles",
+      "loses_to": "loses to grabs, does no damage"
+    },
+    "ParrySuper": {
+      "category": "defense",
+      "summary": "Push Block — costs meter, creates distance on block.",
+      "beats": "attacks, creates space",
+      "loses_to": "costs meter, loses to grabs"
+    },
+    "Plummet": {
+      "category": "attack",
+      "range": "close",
+      "summary": "CRASH — aerial crash down.",
+      "beats": "grounded opponents from above",
+      "loses_to": "predictable landing"
+    },
+    "Punch": {
+      "category": "attack",
+      "range": "close",
+      "summary": "KEYPUNCH — multi-hit punch.",
+      "beats": "chip through block",
+      "loses_to": "short range, punishable on block"
+    },
+    "Roll": {
+      "category": "defense",
+      "summary": "Dodge — invincible roll. Has invincibility frames that avoid all attacks. Good for escaping pressure or dodging predictable attacks. Direction is usually fixed.",
+      "beats": "attacks (invincible frames), projectiles, repositions while safe.",
+      "loses_to": "vulnerable after invincibility ends, loses to delayed attacks and grabs."
+    },
+    "SawBlade": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "SAW BLADE — aerial saw blade, leaves lingering projectile.",
+      "beats": "area control, lingers on field",
+      "loses_to": "very slow startup",
+      "risk": "medium"
+    },
+    "SideKick": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "KICK USER — multi-hit side kick.",
+      "beats": "mid-range opponents",
+      "loses_to": "loses to blocking, moderate commitment"
+    },
+    "SideKickAir": {
+      "category": "attack",
+      "range": "mid",
+      "summary": "Aerial KICK USER."
+    },
+    "Slap": {
+      "category": "attack",
+      "range": "close",
+      "summary": "PING — fast light slap. Quick poke.",
+      "beats": "beats grabs, fast pressure",
+      "loses_to": "short range, low commitment"
+    },
+    "SpotDodge": {
+      "category": "defense",
+      "summary": "Spot Dodge — stationary invincible dodge. Grab invulnerable frames 1-4, fully invulnerable frames 5-7, actionable at frame 11. Beats both attacks and grabs briefly. Very fast recovery allows punishing after dodging.",
+      "beats": "avoids attacks AND grabs without moving. Fast recovery (11 ticks) lets you punish after dodging.",
+      "loses_to": "loses to attacks that hit after frame 7 (delayed attacks, multi-hit moves). Short invulnerability window."
+    },
+    "SuperJump": {
+      "category": "movement",
+      "summary": "Super Jump — high/far jump covering more distance than normal jump. JumpArc payload controls arc. Startup 5 ticks. Covers large horizontal and vertical distance. Use for big repositioning or escaping corner pressure.",
+      "beats": "escapes pressure, covers large distance, avoids grabs and ground attacks.",
+      "loses_to": "longer airtime makes landing predictable. Vulnerable to anti-airs."
+    },
+    "Taunt": {
+      "category": "utility",
+      "summary": "Hustle/taunt — builds meter but leaves you vulnerable.",
+      "beats": "builds meter at safe range",
+      "loses_to": "fully vulnerable during animation, punishable at any range"
+    },
+    "TechRoll": {
+      "category": "defense",
+      "summary": "Tech Dodge — invincible roll on knockdown. Use when knocked down to escape wakeup pressure. Repositions while invincible.",
+      "beats": "avoids wakeup pressure (meaties, grabs on your wakeup).",
+      "loses_to": "direction is predictable, opponent can read and chase."
+    },
+    "Vacuum": {
+      "category": "grab",
+      "range": "mid",
+      "summary": "VACUUM — suction grab attack. Robot's best grab.",
+      "beats": "blocking opponents, decent range for a grab",
+      "loses_to": "loses to attacks, has startup delay"
+    },
+    "Wait": {
+      "category": "utility",
+      "summary": "Do nothing this turn. Low commitment, preserves options.",
+      "beats": "nothing directly, but avoids overcommitting",
+      "loses_to": "gives up initiative, opponent acts freely"
+    },
+    "WhiffInstantCancel": {
+      "category": "utility",
+      "summary": "Cancel a whiffed move. Costs meter."
+    }
+  }
+}

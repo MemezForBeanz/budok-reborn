@@ -1,1 +1,0 @@
-"""Google adapter implementation placeholder."""
