@@ -28,7 +28,8 @@ Every setting below can be edited in game, under **main menu → Mod List → bu
 |---|---|---|
 | `controllers.p1` / `.p2` | `human` / `mcp` | Default controller for matches you start from the game menu. |
 | `turns.forced_turns` | `skip_unless_hurt` | Auto-submit Hold when it is the only option: `never`, `skip_unless_hurt` (keeps DI decisions) or `always`. |
-| `turns.timeout_s.mcp` / `.ai` | `0` / `120` | Seconds before a bot-controlled turn falls back (0 = wait forever). |
+| `controllers.*` values | | `human` (you), `mcp` (a connected chatbot), `ai` (chat model with your API key, `ai.play`) or `decision` (decision model such as Jev, `ai.decide`). |
+| `turns.timeout_s.mcp` / `.ai` / `.decision` | `0` / `120` / `120` | Seconds before a bot-controlled turn falls back (0 = wait forever). |
 | `turns.fallback_action` | `Continue` | Move played on timeout or AI failure. It must be legal; otherwise Continue is used. |
 | `turns.hide_bot_panel` | `true` | Hide a bot's move panel so it can't be clicked by accident. |
 | `turns.history_length` | `12` | Turns of history shown to bots. |
@@ -59,6 +60,43 @@ code-driven moves).
 Keys: `ai.providers.<name>.api_key`, or the environment variable in `api_key_env`
 (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`). `ai.providers.local.base_url` points at any
 OpenAI-compatible server (default Ollama, `http://127.0.0.1:11434/v1`).
+
+## ai.decide: decision models (controller `decision`)
+
+Decision models such as TypeSafe's Jev don't chat: they pick one of a fixed list of options and give a
+probability for each. budok builds the options and the facts, and looks ahead on the real engine. Each turn:
+
+1. One request ranks your moves and predicts the opponent's (two questions, one request).
+2. Your `candidates` likeliest moves are played on the engine against the opponent's `replies` likeliest
+   replies, up to the next decision point.
+3. `threads` lines play on from there for `depth` turns in all. At every decision point inside a line the
+   model picks both fighters' moves, and the picks are drawn from its probabilities so lines differ.
+4. A last request picks among the candidates, each now described with what the engine showed. The move
+   is drawn from its probabilities (`pick: sample`, so the bot is hard to read) or is the likeliest
+   (`pick: best`).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `provider` | `vercel` | `vercel` (AI Gateway, `ai.providers.vercel`) or `typesafe` (TypeSafe's own API, `ai.providers.typesafe`). |
+| `model` | `typesafe-ai/jev` | Decision model ID. With `typesafe`, a TypeSafe model such as `jev-latest` (empty uses TypeSafe's default). |
+| `depth` | `10` | Turns each line plays, counting the move being chosen (up to 30). `1` only plays the next turn for each candidate and reply; `0` turns simulations off, so the first request decides. |
+| `threads` | `4` | Lines that go deep, run at the same time (up to 16). They are spread over the candidates. |
+| `candidates` / `replies` | `4` / `3` | Your moves compared, and opponent replies each one is tested against. Every pair gets at least a one-turn line. |
+| `max_options` | `48` | Options per question (the API allows 255). Each move's default input comes first, then other aims, directions or slider values. |
+| `pick` | `sample` | `sample` draws from the last request's probabilities (never options under 10% of the likeliest); `best` takes the likeliest. |
+| `think_s` | `30` | Thinking time per turn. Lines stop in time for the last request; it is kept 5 s under `turns.timeout_s.decision`. |
+| `request_timeout_s` | `20` | Per request. |
+| `frame_budget_ms` | `8` | Engine time all lines may use per frame. Higher thinks faster but makes the game less smooth. |
+| `extra_body` | `{}` | Merged into every request body. |
+
+Cost and speed: one request per turn of each deep line, plus two. Depth 10 with 4 lines is about 40
+requests a turn for each decision bot; depth 30 with 8 lines is about 240. Each line also needs its own
+copy of the match (about 80 ms of engine work each), and engine time per frame is capped, so a turn takes
+several seconds even with an instant model. Character notes and post-match lessons still come from chat
+models (`ai.annotate`, the notes agent); the decision bot only reads them.
+
+Keys: `ai.providers.vercel.api_key` (or `AI_GATEWAY_API_KEY`), `ai.providers.typesafe.api_key` (or
+`TYPESAFE_API_KEY`).
 
 ## other
 

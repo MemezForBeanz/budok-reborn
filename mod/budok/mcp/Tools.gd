@@ -7,7 +7,7 @@ extends Reference
 
 const Util = preload("res://budok/core/Util.gd")
 const MatchStarter = preload("res://budok/core/MatchStarter.gd")
-const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", "ai.annotate.", "schemas.auto."]
+const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", "ai.annotate.", "ai.decide.", "schemas.auto."]
 # agent_command names a program budok runs, so only the player may set it.
 const SETTING_BLOCKLIST := ["api_key", "base_url", "auth_token", "agent_command"]
 const SESSION_TAKEOVER_MS := 120000
@@ -50,14 +50,14 @@ func _define() -> void:
 	_add("list_characters", "List characters", "All playable characters (vanilla, newer builds and modded) with schema status.", {}, [], true)
 	_add("start_match", "Start match", "Start a local match. Works from the menu or mid-match (the current match is abandoned).",
 		{"p1": character, "p2": character,
-		"controllers": {"type": "object", "description": "Per-slot controller for this match: human | mcp | ai.",
-			"properties": {"p1": {"type": "string", "enum": ["human", "mcp", "ai"]}, "p2": {"type": "string", "enum": ["human", "mcp", "ai"]}}},
+		"controllers": {"type": "object", "description": "Per-slot controller for this match: human | mcp | ai (chat model with an API key) | decision (decision model such as Jev).",
+			"properties": {"p1": {"type": "string", "enum": ["human", "mcp", "ai", "decision"]}, "p2": {"type": "string", "enum": ["human", "mcp", "ai", "decision"]}}},
 		"claim": {"type": "string", "enum": ["p1", "p2", "both", "none"], "description": "Slot(s) this session will play (default: every mcp slot)."},
 		"starting_hp": {"type": "integer", "minimum": 50, "description": "Override both players' HP (shorter matches)."},
 		"settings": {"type": "object", "description": "Native match settings: stage_width, game_length, di_enabled, turbo_mode, infinite_resources, one_hit_ko, burst_enabled, always_perfect_parry, char_distance."}},
 		["p1", "p2"])
 	_add("set_controller", "Set controller", "Change who controls a slot right now: human, mcp or ai (the in-game API-key autopilot).",
-		{"slot": slot, "controller": {"type": "string", "enum": ["human", "mcp", "ai"]}}, ["slot", "controller"])
+		{"slot": slot, "controller": {"type": "string", "enum": ["human", "mcp", "ai", "decision"]}}, ["slot", "controller"])
 	_add("claim_slot", "Claim slot", "Take control of a slot for this MCP session (sets its controller to mcp). A slot held by a disconnected or idle (2 min) session is taken over automatically; force takes it from a live one.",
 		{"slot": slot, "force": {"type": "boolean"}}, ["slot"])
 	_add("release_slot", "Release slot", "Give a claimed slot back (the human can play it again).", {"slot": slot}, ["slot"])
@@ -121,7 +121,7 @@ func _define() -> void:
 			"description": "Workers only: wait up to this long for a character to come up (default 0, capped by mcp.max_wait_s)."}}, [], true)
 	_add("finish_schema_task", "Finish schema task", "End your schema task early: done, or skipped: true to hand it back. Tasks also finish by themselves once every move and the summary have notes.",
 		{"character": {"type": "string"}, "skipped": {"type": "boolean"}}, [])
-	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.*, ai.annotate.* or schemas.auto.* (no keys or URLs).",
+	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.*, ai.annotate.*, ai.decide.* or schemas.auto.* (no keys or URLs).",
 		{"path": {"type": "string"}, "value": {}}, ["path", "value"])
 
 

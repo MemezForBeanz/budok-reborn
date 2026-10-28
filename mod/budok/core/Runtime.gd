@@ -3,7 +3,7 @@ extends Node
 # Wires every budok service together and exposes the in-process API used by
 # MCP tools, the token-mode AI and automation scripts:
 #   runtime.config / roster / schemas / memory / sources / matches / simulator /
-#   mcp / llm / autopilot / annotator, plus the helpers below.
+#   lookahead / mcp / llm / autopilot / decider / annotator, plus the helpers below.
 
 signal status_changed()
 
@@ -17,9 +17,11 @@ const SchemaJobs = preload("res://budok/core/SchemaJobs.gd")
 const SourceBrowser = preload("res://budok/core/SourceBrowser.gd")
 const MatchController = preload("res://budok/core/MatchController.gd")
 const Simulator = preload("res://budok/core/Simulator.gd")
+const Lookahead = preload("res://budok/core/Lookahead.gd")
 const McpServer = preload("res://budok/mcp/McpServer.gd")
 const LlmClient = preload("res://budok/ai/LlmClient.gd")
 const AutoPilot = preload("res://budok/ai/AutoPilot.gd")
+const DecisionPilot = preload("res://budok/ai/DecisionPilot.gd")
 const Annotator = preload("res://budok/ai/Annotator.gd")
 const OverlayPanel = preload("res://budok/ui/Panel.gd")
 const ModMenuHook = preload("res://budok/ui/ModMenuHook.gd")
@@ -37,9 +39,11 @@ var memory = null
 var sources = null
 var matches = null
 var simulator = null
+var lookahead = null
 var mcp = null
 var llm = null
 var autopilot = null
+var decider = null
 var annotator = null
 var schema_jobs = null
 var panel = null
@@ -64,10 +68,14 @@ func _ready() -> void:
 	simulator = _add(Simulator.new(), "Simulator")
 	matches = _add(MatchController.new(), "Matches")
 	matches.setup(self)
+	lookahead = _add(Lookahead.new(), "Lookahead")
+	lookahead.setup(self)
 	llm = _add(LlmClient.new(), "Llm")
 	llm.setup(config)
 	autopilot = _add(AutoPilot.new(), "AutoPilot")
 	autopilot.setup(self, llm)
+	decider = _add(DecisionPilot.new(), "DecisionPilot")
+	decider.setup(self, llm)
 	annotator = _add(Annotator.new(), "Annotator")
 	annotator.setup(self, llm)
 	schema_jobs = _add(SchemaJobs.new(), "SchemaJobs")
@@ -128,7 +136,9 @@ func status() -> Dictionary:
 		"ai": {
 			"play": llm.describe_role("play"),
 			"annotate": llm.describe_role("annotate"),
+			"decide": llm.describe_role("decide"),
 			"autopilot": autopilot.stats,
+			"decision_player": decider.stats,
 		},
 		"annotation_jobs": annotator.jobs.values(),
 		"schema_jobs": schema_jobs.summary(),

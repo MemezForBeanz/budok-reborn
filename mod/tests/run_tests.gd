@@ -13,6 +13,10 @@ const Tools = preload("res://budok/mcp/Tools.gd")
 const Prompts = preload("res://budok/ai/Prompts.gd")
 const Memory = preload("res://budok/core/Memory.gd")
 const NotesAgent = preload("res://budok/core/NotesAgent.gd")
+const LlmClient = preload("res://budok/ai/LlmClient.gd")
+const SimTurns = preload("res://budok/core/SimTurns.gd")
+const DecisionPilot = preload("res://budok/ai/DecisionPilot.gd")
+const Lookahead = preload("res://budok/core/Lookahead.gd")
 
 var failures := 0
 var checks := 0
@@ -29,6 +33,8 @@ func _init() -> void:
 	_test_knowledge()
 	_test_memory()
 	_test_notes_agent()
+	_test_decisions()
+	_test_sim_turns()
 	print("%d checks, %d failures" % [checks, failures])
 	quit(failures)
 
@@ -275,6 +281,54 @@ func _test_notes_agent() -> void:
 	check(allowed, "the notes agent may only use existing notes tools")
 	check(Prompts.notes_worker_prompt(true).find("you are done: stop") != -1, "the headless notes agent stops when the queue is empty")
 	check(Prompts.notes_worker_prompt().find("wait_s") != -1, "a notes chat waits for the next character")
+
+
+func _test_decisions() -> void:
+	var questions = {"you": {"instructions": "pick", "options": {"Slash": "a", "Grab": "b", "Continue": "c"}}}
+	var gateway = LlmClient.parse_decision({"answers": {"you": {"type": "choice", "choice": "Grab", "probabilities": {"Slash": 0.2, "Grab": 0.6, "Continue": 0.2}}},
+		"usage": {"inputTokens": 120, "outputTokens": 3}}, questions)
+	check(gateway["ok"] and gateway["answers"]["you"]["choice"] == "Grab" and abs(gateway["answers"]["you"]["probabilities"]["Grab"] - 0.6) < 0.001,
+		"gateway decision answers are read")
+	check(gateway["usage"]["input_tokens"] == 120, "gateway usage is read")
+	var bare = LlmClient.parse_decision({"answers": {"you": {"type": "choice", "choice": "Slash"}}, "usage": {"input_tokens": 9}}, questions)
+	check(bare["ok"] and bare["answers"]["you"]["probabilities"]["Slash"] == 1.0 and bare["answers"]["you"]["probabilities"]["Grab"] == 0.0,
+		"a choice without probabilities counts as certain")
+	var skewed = LlmClient.parse_decision({"answers": {"you": {"type": "choice", "choice": "Slash", "probabilities": {"Slash": 2, "Grab": 2, "Jump": 5}}}}, questions)
+	check(skewed["ok"] and abs(skewed["answers"]["you"]["probabilities"]["Slash"] - 0.5) < 0.001, "probabilities are renormalised over the asked options")
+	check(not LlmClient.parse_decision({"answers": {"you": {"type": "refusal"}}}, questions)["ok"], "a refusal is an error")
+	check(not LlmClient.parse_decision({"answers": {"you": {"type": "choice", "choice": "Fly"}}}, questions)["ok"], "an unknown option is an error")
+	check(not LlmClient.parse_decision({"answers": {}}, questions)["ok"], "a missing answer is an error")
+	var options = []
+	for label in ["A", "B", "C", "D"]:
+		options.append({"label": label})
+	var ranked = DecisionPilot._top(options, {"A": 0.1, "B": 0.5, "C": 0.3, "D": 0.1}, 2)
+	check(ranked.size() == 2 and ranked[0]["label"] == "B" and ranked[1]["label"] == "C", "candidates are the likeliest options")
+	var plan = DecisionPilot._plan([{"label": "A"}, {"label": "B"}], [{"label": "x"}, {"label": "y"}], {"depth": 10, "threads": 3})
+	var deep = 0
+	for line in plan:
+		deep += 1 if line["depth"] == 10 else 0
+	check(plan.size() == 4 and deep == 3 and plan[0]["candidate"] == 0 and plan[1]["candidate"] == 1 and plan[2]["reply"] == 1,
+		"deep lines spread over candidates, short lines cover the other pairs")
+	check(DecisionPilot._plan([{"label": "A"}], [{"label": "x"}], {"depth": 1, "threads": 4}).size() == 1, "depth 1 only plays the next turn")
+	var line_results = [{"ok": true, "first": {"dealt": 100, "taken": 0, "ko": ""}, "turns": 1}]
+	var facts = DecisionPilot._facts([{"label": "A", "description": "Slash (Attack)"}], [{"label": "x"}], {"x": 1.0},
+		[{"candidate": 0, "reply": 0, "depth": 1}], line_results)
+	check(facts[0]["text"].find("vs x (100% likely): you deal 100, take 0") != -1 and facts[0]["score"] == 100.0, "simulation facts describe each candidate")
+
+
+func _test_sim_turns() -> void:
+	check(SimTurns.relative_direction("NE", 1) == "up-fwd" and SimTurns.relative_direction("NE", -1) == "up-back", "screen directions read relative to the opponent")
+	var aims = SimTurns.variants({"kind": "xy", "default": {"x": 50, "y": 0}}, -1, 1)
+	check(aims.size() == 5 and aims[0]["input"]["x"] == -100 and aims[2]["input"]["y"] == -100, "free aims point toward the opponent")
+	var limited = SimTurns.variants({"kind": "xy", "limit_angle": true, "default": {"x": 70, "y": -20}}, -1, 1)
+	check(limited.size() == 1 and limited[0]["input"]["x"] == -70, "a limited aim keeps its default, mirrored when facing the other way")
+	var eight = {"kind": "direction8", "allowed": ["E", "NE", "Neutral"], "default": {"x": 1, "y": 0}}
+	var mirrored = SimTurns.variants(eight, -1, 1)
+	check(mirrored.size() == 2 and mirrored[0]["input"] == "W" and mirrored[0]["label"] == "fwd", "direction pickers mirror with facing")
+	check(PayloadSpec.coerce(SimTurns.facing_spec(eight, -1, 1), "W")["ok"], "mirrored directions are accepted")
+	var numbers = SimTurns.variants({"kind": "int_field", "key": "v", "min": 0, "max": 10, "default": {"v": 0}}, 1, 1)
+	check(numbers.size() == 3 and numbers[1]["input"] == 5, "sliders try min, middle and max")
+	check(SimTurns.variants({"kind": "none"}, 1, 1)[0]["input"] == null, "moves without input have one option")
 
 
 func _test_http_parsing() -> void:

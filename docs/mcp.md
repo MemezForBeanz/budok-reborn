@@ -19,7 +19,7 @@ client tool timeouts. Supported protocol versions: `2025-06-18`, `2025-03-26` an
 | `get_status` | Versions, server, match (characters, controllers, open turns, last result), AI settings, schema jobs. |
 | `list_characters` | Every playable character (vanilla, newer builds, mods), with schema status and notes coverage. |
 | `start_match` | `{p1, p2, controllers?, claim?, starting_hp?, settings?}`. Works from the menu or mid-match. By default you play P2 and the human plays P1. Says which characters have no move notes yet (`notes_missing`), with how to write them. |
-| `set_controller` | Switch a slot between `human`, `mcp` and `ai` at any time. |
+| `set_controller` | Switch a slot between `human`, `mcp`, `ai` (chat model with an API key) and `decision` (decision model such as Jev) at any time. |
 | `claim_slot` / `release_slot` | Take or return a slot for this session. Unclaimed `mcp` slots stay playable by the human. |
 | `wait_for_turn` | Long-poll. Returns `your_turn` with `turn_token`, `situation` (plain text), `observation`, `legal_actions` (with payload specs, measured frames and notes), `extras` and `payload_help` (how to fill each payload type). Can also return `waiting` (call again) or `match_over`. `detail`: `compact` (move names with payload types and a slim observation, about a fifth of the size), `summary` (default: short notes and frame data) or `full` (all notes, raw resources and the opponent's legal options). A turn where `Continue` is the only move is always minimal (`only_option`). |
 | `get_turn` | The open turn, without waiting. |

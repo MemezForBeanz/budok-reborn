@@ -30,12 +30,42 @@ func run(game, actions: Dictionary, choosing: Array, max_ticks: int, viewer_slot
 		waited += 1
 	if _busy:
 		return {"ok": false, "error": "another simulation is still running"}
+	_busy = true
+	var spawned = yield(spawn(game), "completed")
+	if not spawned["ok"]:
+		_busy = false
+		return spawned
+	var sim = spawned["game"]
+	for slot in ["p1", "p2"]:
+		var fighter = sim.get_player(1 if slot == "p1" else 2)
+		# Only players who are choosing this turn get an action, exactly like
+		# the live game; a busy player keeps executing their current move.
+		if not (slot in choosing):
+			continue
+		var queued = actions.get(slot)
+		if not (queued is Dictionary):
+			queued = {"action": "Continue", "data": null, "extra": NEUTRAL_EXTRA.duplicate(true)}
+		# on_action_selected clears the interruptable flags the same way a
+		# real lock-in does; usability was validated by the caller.
+		fighter.on_action_selected(queued["action"], queued.get("data"), queued.get("extra", NEUTRAL_EXTRA.duplicate(true)))
+	var mine = actions.get(viewer_slot)
+	var followups = mine.get("then", []).duplicate() if mine is Dictionary else []
+	var result = _step(sim, max_ticks, viewer_slot, followups)
+	discard(sim)
+	_busy = false
+	return result
+
+
+# Coroutine: a hidden preview game holding a copy of the live match, ready to
+# tick. Returns {"ok", "game"} or {"ok": false, "error"}; free it with discard().
+# Several can exist at once (the decision player runs one per line).
+func spawn(game) -> Dictionary:
+	yield(get_tree(), "idle_frame")
 	if not Util.valid(game) or not bool(Util.prop(game, "game_started", false)):
 		return {"ok": false, "error": "no match in progress"}
 	var packed = load(GAME_SCENE)
 	if packed == null:
 		return {"ok": false, "error": "cannot load %s in this game build" % GAME_SCENE}
-	_busy = true
 	var sim = packed.instance()
 	sim.is_ghost = true
 	_viewport().add_child(sim)
@@ -50,31 +80,21 @@ func run(game, actions: Dictionary, choosing: Array, max_ticks: int, viewer_slot
 		sim.prediction_enabled = true
 	yield(get_tree(), "idle_frame")
 	if not Util.valid(game) or not Util.valid(sim):
-		_finish(sim)
+		discard(sim)
 		return {"ok": false, "error": "match ended during simulation setup"}
 	game.copy_to(sim)
 	var objs_map = Util.prop(sim, "objs_map", {})
 	for key in objs_map:
 		if Util.valid(objs_map[key]):
 			objs_map[key].is_ghost = true
-	for slot in ["p1", "p2"]:
-		var fighter = sim.get_player(1 if slot == "p1" else 2)
-		fighter.is_ghost = true
-		# Only players who are choosing this turn get an action, exactly like
-		# the live game; a busy player keeps executing their current move.
-		if not (slot in choosing):
-			continue
-		var queued = actions.get(slot)
-		if not (queued is Dictionary):
-			queued = {"action": "Continue", "data": null, "extra": NEUTRAL_EXTRA.duplicate(true)}
-		# on_action_selected clears the interruptable flags the same way a
-		# real lock-in does; usability was validated by the caller.
-		fighter.on_action_selected(queued["action"], queued.get("data"), queued.get("extra", NEUTRAL_EXTRA.duplicate(true)))
-	var mine = actions.get(viewer_slot)
-	var followups = mine.get("then", []).duplicate() if mine is Dictionary else []
-	var result = _step(sim, max_ticks, viewer_slot, followups)
-	_finish(sim)
-	return result
+	for id in [1, 2]:
+		sim.get_player(id).is_ghost = true
+	return {"ok": true, "game": sim}
+
+
+func discard(sim) -> void:
+	if Util.valid(sim):
+		sim.queue_free()
 
 
 func _step(sim, max_ticks: int, viewer: String, followups: Array) -> Dictionary:
@@ -269,9 +289,3 @@ func _viewport() -> Viewport:
 		_sandbox.audio_listener_enable_2d = false
 		add_child(_sandbox)
 	return _sandbox
-
-
-func _finish(sim) -> void:
-	if Util.valid(sim):
-		sim.queue_free()
-	_busy = false

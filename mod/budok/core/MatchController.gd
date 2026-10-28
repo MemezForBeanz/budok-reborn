@@ -23,7 +23,9 @@ const ActionCatalog = preload("res://budok/core/ActionCatalog.gd")
 const Observation = preload("res://budok/core/Observation.gd")
 const Introspector = preload("res://budok/core/Introspector.gd")
 const PayloadSpec = preload("res://budok/core/PayloadSpec.gd")
-const CONTROLLERS := ["human", "mcp", "ai"]
+const CONTROLLERS := ["human", "mcp", "ai", "decision"]
+# Controllers played inside the game (token mode): ai (chat model), decision (decision model).
+const IN_GAME_BOTS := ["ai", "decision"]
 const SLOTS := ["p1", "p2"]
 const MATCH_LOG_DIR := "user://budok/matches"
 const CLOSED_TURNS_KEPT := 16
@@ -59,6 +61,7 @@ var _motion_positions := {}
 var _motion_tick := -1
 var _starting := false
 var _buttons_cache := {}
+var _move_specs := {"p1": {}, "p2": {}}
 
 
 func setup(runtime_ref) -> void:
@@ -116,7 +119,7 @@ func set_controller(slot: String, controller: String) -> Dictionary:
 	if controller != "mcp":
 		owners[slot] = ""
 	_update_panel(slot)
-	if turns[slot] != null and controller == "ai":
+	if turns[slot] != null and controller in IN_GAME_BOTS:
 		emit_signal("turn_opened", slot, turns[slot]["token"])
 	return {"ok": true, "controllers": controllers.duplicate()}
 
@@ -444,6 +447,14 @@ func infos() -> Dictionary:
 	return _infos()
 
 
+# Every move's payload spec (not only the legal ones), the facing its defaults
+# were read with and the character extras' neutral values, for previews that
+# play several turns ahead. Read at the slot's first turn of the match, right
+# after its panel opened and before anyone could change the controls.
+func move_specs(slot: String) -> Dictionary:
+	return _move_specs.get(slot, {})
+
+
 func match_log(last_n: int = 20) -> Dictionary:
 	return {
 		"characters": {
@@ -488,6 +499,7 @@ func _attach(current) -> void:
 	_motion = {}
 	_motion_positions = {}
 	_motion_tick = -1
+	_move_specs = {"p1": {}, "p2": {}}
 	if _next_controllers != null:
 		for slot in SLOTS:
 			if _next_controllers.has(slot):
@@ -565,8 +577,10 @@ func _open_turn(slot: String, buttons, fighter) -> void:
 		"catalog": catalog,
 	}
 	turns[slot] = turn
+	if _move_specs[slot].empty():
+		_move_specs[slot] = _read_move_specs(buttons, fighter, catalog)
 	_update_panel(slot)
-	var bot_controlled = controllers[slot] == "ai" or (controllers[slot] == "mcp" and owners[slot] != "")
+	var bot_controlled = controllers[slot] in IN_GAME_BOTS or (controllers[slot] == "mcp" and owners[slot] != "")
 	if bot_controlled and _is_forced(catalog, fighter):
 		submit(turn["token"], "Continue", null, {}, "auto_forced")
 		_auto_at[slot] = tick
@@ -574,6 +588,19 @@ func _open_turn(slot: String, buttons, fighter) -> void:
 			_auto_turns[slot].append(str(Util.prop(Util.call_or(fighter, "current_state"), "state_name", "?")))
 		return
 	emit_signal("turn_opened", slot, turn["token"])
+
+
+func _read_move_specs(buttons, fighter, catalog: Dictionary) -> Dictionary:
+	var specs = {}
+	for button in Util.prop(buttons, "buttons", []):
+		var action = str(Util.prop(button, "action_name", "")) if Util.valid(button) else ""
+		if action != "" and not specs.has(action):
+			specs[action] = catalog["specs"][action] if catalog["specs"].has(action) else PayloadSpec.describe_data_node(Util.prop(button, "data_node", null))
+	var extras = {}
+	var character = catalog["extras"].get("character", {})
+	for key in character:
+		extras[key] = false if character[key]["default"] is bool else character[key]["default"]
+	return {"specs": specs, "facing": Util.as_int(Util.call_or(fighter, "get_facing_int", [], 1), 1), "extras": extras}
 
 
 func _close_turn(slot: String, how: String) -> void:
@@ -775,7 +802,7 @@ func _annotated_actions(slot: String, actions: Array, detail: String) -> Array:
 
 func _update_panel(slot: String) -> void:
 	var should_hide = bool(runtime.config.get_value("turns.hide_bot_panel", true)) and (
-		controllers[slot] == "ai" or (controllers[slot] == "mcp" and owners[slot] != ""))
+		controllers[slot] in IN_GAME_BOTS or (controllers[slot] == "mcp" and owners[slot] != ""))
 	_set_panel_hidden(slot, should_hide)
 
 

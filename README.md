@@ -60,13 +60,25 @@ In the **AI** tab (keys go in **Providers**):
 - **Move making**: provider, model, effort, tool steps, simulations per turn, play style and risk.
 - **Schema creation**: a separate provider and model for writing notes on modded characters (a strong
   model is worth it, since this runs once per character).
-- **Providers** tab: API keys for Anthropic, OpenAI and OpenRouter (stored in `user://budok/config.json`,
-  or read from the usual environment variables), plus the URL of a local OpenAI-compatible server
-  (Ollama, LM Studio).
+- **Providers** tab: API keys for Anthropic, OpenAI, OpenRouter, Vercel AI Gateway and TypeSafe (stored
+  in `user://budok/config.json`, or read from the usual environment variables), plus the URL of a local
+  OpenAI-compatible server (Ollama, LM Studio).
 
 Then set a slot to `ai` in the **Players** tab, or start a match with `controllers: {"p2": "ai"}`. Each
 turn the model gets the situation, can simulate candidate moves and must submit one. Turn timeouts fall
 back to a safe move. All settings: [docs/settings.md](docs/settings.md).
+
+### Decision models (Jev)
+
+Decision models such as TypeSafe's [Jev](https://vercel.com/i/what-is-jev) pick from fixed options and
+return a probability for each, instead of chatting. Set a slot to `decision`, put a Vercel AI Gateway key
+in **Providers → vercel** (or a TypeSafe key in **typesafe**), and pick the model in **AI → Decision
+model** (default `typesafe-ai/jev`). Each turn budok asks the model to rank your moves and guess the
+opponent's, plays your best candidates against its likeliest replies on the real engine, and lets
+several lines play on for up to 30 turns with the model choosing both fighters' moves. A last request
+picks your move from what those lines showed, and the move is drawn from its probabilities, so the bot
+is hard to read. Lookahead depth (10 by default), how many lines run at once (4), and the thinking time
+are all settings: see [docs/settings.md](docs/settings.md#aidecide-decision-models-controller-decision).
 
 ## Modded characters
 

@@ -6,8 +6,9 @@ extends Reference
 # to edit has a field here.
 
 const Util = preload("res://budok/core/Util.gd")
-const CONTROLLERS := ["human", "mcp", "ai"]
+const CONTROLLERS := ["human", "mcp", "ai", "decision"]
 const PROVIDERS := ["anthropic", "openai", "openrouter", "local"]
+const DECISION_PROVIDERS := [["vercel", "Vercel AI Gateway"], ["typesafe", "TypeSafe"]]
 const EFFORTS := ["", "low", "medium", "high", "xhigh", "max"]
 const AUTO_WHEN := [["matches", "Only before matches"], ["connect", "On boot and when a chatbot connects"]]
 const ROLE_FIELDS := [
@@ -83,6 +84,12 @@ func refresh_status() -> void:
 		lines.append("AI: %d turns, %d fallbacks, %d/%d tokens in/out" % [auto["turns"], auto["fallbacks"], auto["input_tokens"], auto["output_tokens"]])
 		if auto["last_error"] != "":
 			lines.append("AI last error: " + auto["last_error"])
+	var decider = status["ai"]["decision_player"]
+	if decider["turns"] > 0 or decider["last_error"] != "":
+		lines.append("Decision model: %d turns, %d calls, %d lines, %d fallbacks%s" % [decider["turns"], decider["calls"], decider["lines"], decider["fallbacks"],
+			(", last: " + decider["last_decision"]) if decider["last_decision"] != "" else ""])
+		if decider["last_error"] != "":
+			lines.append("Decision model last error: " + decider["last_error"])
 	var agent = status.get("notes_agent", {})
 	if agent.get("state", "idle") != "idle":
 		lines.append("Notes agent: %s%s" % [agent["state"], (": " + agent["error"]) if agent.has("error") else ""])
@@ -122,9 +129,11 @@ func _players_tab() -> Control:
 	var box = _tab("Players")
 	_field(box, "controllers.p1", "P1 controller", "option", CONTROLLERS)
 	_field(box, "controllers.p2", "P2 controller", "option", CONTROLLERS)
-	box.add_child(_hint("human: you play it. mcp: a connected chatbot plays it (you can still play it until one claims the slot). ai: the API-key model from the AI tab. Applies now and to matches started from the menu."))
+	box.add_child(_hint("human: you play it. mcp: a connected chatbot plays it (you can still play it until one claims the slot). ai: the API-key chat model from the AI tab. "
+		+ "decision: the decision model from the AI tab (such as Jev), which simulates turns ahead. Applies now and to matches started from the menu."))
 	_field(box, "turns.forced_turns", "Auto-hold when Hold is the only option", "option", ["never", "skip_unless_hurt", "always"])
 	_field(box, "turns.timeout_s.ai", "AI turn timeout (s, 0 = none)", "int", [0, 3600])
+	_field(box, "turns.timeout_s.decision", "Decision model turn timeout (s, 0 = none)", "int", [0, 3600])
 	_field(box, "turns.timeout_s.mcp", "MCP turn timeout (s, 0 = none)", "int", [0, 3600])
 	_field(box, "turns.fallback_action", "Fallback move on timeout", "string")
 	_field(box, "turns.hide_bot_panel", "Hide a bot's move panel", "bool")
@@ -153,14 +162,29 @@ func _ai_tab() -> Control:
 			_field(box, prefix + "batch_size", "Moves per batch", "int", [1, 50])
 			_field(box, prefix + "include_source", "Send code of code-driven moves", "bool")
 			_field(box, prefix + "max_source_chars", "Max code characters per move", "int", [500, 50000])
-			box.add_child(_save_row())
+	box.add_child(_header("Decision model (controller: decision)"))
+	_field(box, "ai.decide.provider", "Provider", "option", DECISION_PROVIDERS)
+	_field(box, "ai.decide.model", "Model", "string")
+	_field(box, "ai.decide.depth", "Turns each line looks ahead (0 = no simulations)", "int", [0, 30])
+	_field(box, "ai.decide.threads", "Lines simulated at once", "int", [1, 16])
+	_field(box, "ai.decide.candidates", "Own moves compared", "int", [1, 16])
+	_field(box, "ai.decide.replies", "Opponent replies tested per move", "int", [1, 8])
+	_field(box, "ai.decide.max_options", "Options per question", "int", [2, 255])
+	_field(box, "ai.decide.pick", "Pick", "option", [["sample", "Draw from its probabilities"], ["best", "Always the likeliest"]])
+	_field(box, "ai.decide.think_s", "Thinking time per turn (s)", "int", [3, 600])
+	_field(box, "ai.decide.request_timeout_s", "Request timeout (s)", "int", [2, 300])
+	_field(box, "ai.decide.frame_budget_ms", "Simulation time per frame (ms; higher thinks faster, game less smooth)", "int", [1, 100])
+	box.add_child(_hint("Each turn the model ranks your moves and guesses the opponent's, budok plays your best candidates on the real engine "
+		+ "against its likeliest replies, and each line plays on with the model choosing both fighters' moves. A last call picks the move from those results. "
+		+ "One call per turn of each line: depth 10 with 4 lines is about 40 calls a turn."))
+	box.add_child(_save_row())
 	return _end_tab(box)
 
 
 func _providers_tab() -> Control:
 	var box = _tab("Providers")
 	box.add_child(_hint("Keys are stored in user://budok/config.json and never shown again. Leave a key empty to keep it (or to use the environment variable)."))
-	for provider in PROVIDERS:
+	for provider in PROVIDERS + ["vercel", "typesafe"]:
 		box.add_child(_header(provider))
 		if provider != "local":
 			_field(box, "ai.providers.%s.api_key" % provider, "API key", "secret")

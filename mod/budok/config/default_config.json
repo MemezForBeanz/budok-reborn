@@ -15,7 +15,7 @@
   },
   "turns": {
     "forced_turns": "skip_unless_hurt",
-    "timeout_s": {"mcp": 0, "ai": 120},
+    "timeout_s": {"mcp": 0, "ai": 120, "decision": 120},
     "fallback_action": "Continue",
     "hide_bot_panel": true,
     "history_length": 12
@@ -25,7 +25,9 @@
       "anthropic": {"api_key": "", "api_key_env": "ANTHROPIC_API_KEY", "base_url": "https://api.anthropic.com"},
       "openai": {"api_key": "", "api_key_env": "OPENAI_API_KEY", "base_url": "https://api.openai.com/v1"},
       "openrouter": {"api_key": "", "api_key_env": "OPENROUTER_API_KEY", "base_url": "https://openrouter.ai/api/v1"},
-      "local": {"api_key": "", "api_key_env": "", "base_url": "http://127.0.0.1:11434/v1"}
+      "local": {"api_key": "", "api_key_env": "", "base_url": "http://127.0.0.1:11434/v1"},
+      "vercel": {"api_key": "", "api_key_env": "AI_GATEWAY_API_KEY", "base_url": "https://ai-gateway.vercel.sh/v4/ai"},
+      "typesafe": {"api_key": "", "api_key_env": "TYPESAFE_API_KEY", "base_url": "https://api.typesafe.ai"}
     },
     "play": {
       "provider": "anthropic",
@@ -42,6 +44,20 @@
       "style": "",
       "risk": "balanced",
       "refusal_fallback": true,
+      "extra_body": {}
+    },
+    "decide": {
+      "provider": "vercel",
+      "model": "typesafe-ai/jev",
+      "depth": 10,
+      "threads": 4,
+      "candidates": 4,
+      "replies": 3,
+      "max_options": 48,
+      "pick": "sample",
+      "think_s": 30,
+      "request_timeout_s": 20,
+      "frame_budget_ms": 8,
       "extra_body": {}
     },
     "annotate": {

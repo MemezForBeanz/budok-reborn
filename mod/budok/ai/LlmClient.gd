@@ -1,13 +1,18 @@
 extends Node
 
-# Provider-neutral tool-calling chat over raw HTTPS (Godot HTTPRequest).
+# Provider-neutral tool-calling chat and decision-model calls over raw HTTPS
+# (Godot HTTPRequest).
 #   anthropic                    - Messages API (/v1/messages)
 #   openai / openrouter / local  - OpenAI-compatible /chat/completions
-# Each role (ai.play, ai.annotate) picks its own provider, model and limits.
+#   vercel                       - AI Gateway decision models (/decision-model)
+#   typesafe                     - TypeSafe's API for Jev (/v1/systemone)
+# Each role (ai.play, ai.annotate, ai.decide) picks its own provider, model and limits.
 #
 # chat() is a coroutine returning:
 #   {"ok", "provider", "assistant": <message to append verbatim>, "text",
 #    "tool_calls": [{"id", "name", "input"}], "stop_reason", "usage", "error"?}
+# decide() is a coroutine returning:
+#   {"ok", "answers": {name: {"choice", "probabilities": {label: p}}}, "usage", "error"?}
 
 const Util = preload("res://budok/core/Util.gd")
 const ANTHROPIC_VERSION := "2026-10-21"
@@ -16,6 +21,10 @@ const FALLBACK_BETA := "server-side-fallback-2026-07-01"
 const FALLBACK_MODELS := ["claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"]
 const RETRY_CODES := [408, 429, 500, 502, 503, 504, 529]
 const MAX_ATTEMPTS := 3
+const DECISION_PROVIDERS := ["vercel", "typesafe"]
+# Headers the AI SDK's gateway provider sends (@ai-sdk/gateway).
+const GATEWAY_PROTOCOL_VERSION := "0.0.1"
+const DECISION_SPEC_VERSION := "4"
 
 var config = null
 
@@ -26,7 +35,7 @@ func setup(config_ref) -> void:
 
 func describe_role(role: String) -> Dictionary:
 	var cfg = config.get_value("ai." + role, {})
-	var provider = str(cfg.get("provider", "anthropic"))
+	var provider = str(cfg.get("provider", "vercel" if role == "decide" else "anthropic"))
 	return {
 		"provider": provider,
 		"model": str(cfg.get("model", "")),
@@ -52,6 +61,93 @@ func chat(role: String, system: String, messages: Array, tools: Array) -> Dictio
 	if not response["ok"]:
 		return {"ok": false, "provider": provider, "error": response["error"]}
 	return _parse_anthropic(response["json"]) if provider == "anthropic" else _parse_openai(response["json"])
+
+
+# Coroutine: one call to a decision model (ai.<role>, provider vercel or
+# typesafe). It answers every question at once against the same state by
+# picking one of the question's options, with a probability for each.
+# questions: {name: {"instructions": text, "options": {label: description}}}.
+func decide(role: String, state: String, questions: Dictionary, timeout_s: float = 0.0) -> Dictionary:
+	yield(get_tree(), "idle_frame")
+	var cfg = config.get_value("ai." + role, {})
+	var provider = str(cfg.get("provider", "vercel"))
+	if not (provider in DECISION_PROVIDERS):
+		return {"ok": false, "error": "ai.%s.provider must be one of %s" % [role, str(DECISION_PROVIDERS)]}
+	var key = config.api_key(provider)
+	if key == "":
+		return {"ok": false, "error": "no API key for provider '%s': set it in the budok settings (Providers) or the %s environment variable" % [
+			provider, config.get_value("ai.providers.%s.api_key_env" % provider, "?")]}
+	var model = str(cfg.get("model", ""))
+	if model == "" and provider == "vercel":
+		return {"ok": false, "error": "set ai.%s.model to a decision model id, such as typesafe-ai/jev" % role}
+	# The model id is sent as a header (and can be set over MCP).
+	if model.find("\n") != -1 or model.find("\r") != -1:
+		return {"ok": false, "error": "ai.%s.model must be a single line" % role}
+	var wire = {}
+	for name in questions:
+		wire[name] = {"type": "choice", "instructions": questions[name]["instructions"], "criteria": questions[name]["options"]}
+	var base = str(config.get_value("ai.providers.%s.base_url" % provider, "")).trim_suffix("/")
+	var url = base + "/v1/systemone"
+	var headers = ["content-type: application/json", "authorization: Bearer " + key]
+	var body = {"state": state, "questions": wire}
+	if provider == "vercel":
+		url = base + "/decision-model"
+		headers += ["ai-gateway-protocol-version: " + GATEWAY_PROTOCOL_VERSION, "ai-gateway-auth-method: api-key",
+			"ai-decision-model-specification-version: " + DECISION_SPEC_VERSION, "ai-model-id: " + model]
+		body = {"stateParts": [{"type": "text", "text": state}], "questions": wire}
+	elif model != "":
+		body["model"] = model
+	_merge_extra(body, cfg)
+	var timeout = timeout_s if timeout_s > 0.0 else float(cfg.get("request_timeout_s", 20))
+	var response = {}
+	for attempt in range(2):
+		# Polled on a thread: the lookahead makes many short calls in a row.
+		response = yield(_send(url, headers, Util.json_str(body), timeout, HTTPClient.METHOD_POST, true), "completed")
+		if response["ok"] or not (int(response.get("status", 0)) in RETRY_CODES) or attempt == 1:
+			break
+		yield(get_tree().create_timer(1.0), "timeout")
+	if not response["ok"]:
+		return {"ok": false, "error": response["error"]}
+	return parse_decision(response["json"], questions)
+
+
+# Normalizes both APIs' answers: probabilities over exactly the asked labels,
+# summing to 1 (a bare choice counts as certain).
+static func parse_decision(json, questions: Dictionary) -> Dictionary:
+	if not (json is Dictionary) or not (json.get("answers") is Dictionary):
+		return {"ok": false, "error": "unexpected response: %s" % Util.truncate(Util.json_str(json), 300)}
+	var answers = {}
+	for name in questions:
+		var answer = json["answers"].get(name)
+		if not (answer is Dictionary):
+			return {"ok": false, "error": "no answer for question '%s'" % name}
+		if str(answer.get("type", "")) == "refusal":
+			return {"ok": false, "error": "the model declined to answer '%s'" % name}
+		var labels = questions[name]["options"].keys()
+		var choice = str(answer.get("choice", ""))
+		var probabilities = {}
+		var total = 0.0
+		var raw = answer.get("probabilities")
+		for label in labels:
+			var value = Util.numeric(raw.get(label, 0.0)) if raw is Dictionary else 0.0
+			var p = max(0.0, float(value)) if (value is float or value is int) else 0.0
+			probabilities[label] = p
+			total += p
+		if total <= 0.0:
+			if not (choice in labels):
+				return {"ok": false, "error": "question '%s' was answered with an unknown option '%s'" % [name, choice]}
+			probabilities[choice] = 1.0
+			total = 1.0
+		var best = ""
+		for label in labels:
+			probabilities[label] /= total
+			if best == "" or probabilities[label] > probabilities[best]:
+				best = label
+		answers[name] = {"choice": choice if choice in labels else best, "probabilities": probabilities}
+	var usage = json.get("usage", {}) if json.get("usage") is Dictionary else {}
+	return {"ok": true, "answers": answers, "model": str(json.get("model", "")), "usage": {
+		"input_tokens": Util.as_int(usage.get("inputTokens", usage.get("input_tokens", 0))),
+		"output_tokens": Util.as_int(usage.get("outputTokens", usage.get("output_tokens", 0)))}}
 
 
 # Messages carrying tool results back, in the provider's format.
@@ -196,8 +292,9 @@ func get_json(url: String, timeout_s: float = 30.0) -> Dictionary:
 	return response
 
 
-func _send(url: String, headers: Array, body: String, timeout_s: float, method: int = HTTPClient.METHOD_POST) -> Dictionary:
+func _send(url: String, headers: Array, body: String, timeout_s: float, method: int = HTTPClient.METHOD_POST, threaded: bool = false) -> Dictionary:
 	var http = HTTPRequest.new()
+	http.use_threads = threaded
 	add_child(http)
 	if Util.has_prop(http, "timeout"):
 		http.timeout = timeout_s
