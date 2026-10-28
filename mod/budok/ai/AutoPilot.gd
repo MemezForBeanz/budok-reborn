@@ -74,13 +74,15 @@ func _tools(slot: String) -> Array:
 			"who": {"type": "string", "enum": ["me", "opponent"]},
 			"moves": {"type": "array", "items": {"type": "string"}}}, "required": ["who", "moves"]},
 	})
+	var submit = {
+		"action": {"type": "string"}, "data": {}, "extra": {"type": "object"},
+		"note": {"type": "string", "description": "One short line on why (kept as memory for later turns)."}}
+	if runtime.speech.enabled():
+		submit["say"] = {"type": "string", "description": "A line shown in a speech bubble above your character (under 80 characters)."}
 	tools.append({
 		"name": "submit_action",
 		"description": "Lock in your move for this turn. Required exactly once.",
-		"parameters": {"type": "object", "properties": {
-			"action": {"type": "string"}, "data": {}, "extra": {"type": "object"},
-			"note": {"type": "string", "description": "One short line on why (kept as memory for later turns)."}},
-			"required": ["action"]},
+		"parameters": {"type": "object", "properties": submit, "required": ["action"]},
 	})
 	return tools
 
@@ -143,6 +145,8 @@ func _take_turn(slot: String, token: String) -> void:
 					if output.get("ok", false):
 						submitted = true
 						_remember(slot, view["tick"], str(input.get("action", "")), str(input.get("note", reply.get("text", ""))))
+						if str(input.get("say", "")).strip_edges() != "":
+							runtime.speech.say(slot, str(input["say"]))
 				_:
 					output = {"ok": false, "error": "unknown tool"}
 			results.append({"id": tool_call["id"], "content": Util.json_str(output), "is_error": not output.get("ok", true)})
@@ -231,6 +235,8 @@ func _turn_prompt(slot: String, view: Dictionary, max_sims: int) -> String:
 	]
 	if not _notes[slot].empty():
 		parts.append("Your recent notes: " + PoolStringArray(_notes[slot]).join(" | "))
+	if runtime.speech.trash_talk():
+		parts.append("Trash talk is on: include a short taunt in submit_action's say.")
 	if runtime.matches.controllers.get(slot) == "tandem":
 		parts.append("You may use look_ahead (the decision core) and simulate up to %d candidates, then call submit_action exactly once. Be brief." % max_sims)
 	else:

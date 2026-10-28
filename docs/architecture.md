@@ -34,6 +34,7 @@ YOMI Hustle process
    ├─ ai/DecisionPilot      decision-model player (controller "decision"): analyze, then pick
    ├─ ai/Annotator          token mode schema writer
    ├─ ui/SettingsView       all settings as four tabs (Play, Models, Chatbots, Characters)
+   ├─ ui/SpeechBubbles      lines bots say, in a bubble above their fighter (Play tab, Misc)
    ├─ ui/ModMenuHook        adds those tabs to the game's Mod List → budok entry
    ├─ ui/Panel              same tabs on the F8 overlay
    └─ automation/Automation optional user GDScript

@@ -20,6 +20,7 @@ const DecisionPilot = preload("res://budok/ai/DecisionPilot.gd")
 const Config = preload("res://budok/core/Config.gd")
 # Preloaded so a parse error in the settings UI fails the tests.
 const SettingsView = preload("res://budok/ui/SettingsView.gd")
+const SpeechBubbles = preload("res://budok/ui/SpeechBubbles.gd")
 const Lookahead = preload("res://budok/core/Lookahead.gd")
 
 var failures := 0
@@ -39,6 +40,7 @@ func _init() -> void:
 	_test_notes_agent()
 	_test_decisions()
 	_test_sim_turns()
+	_test_talk_and_playbook()
 	print("%d checks, %d failures" % [checks, failures])
 	quit(failures)
 
@@ -346,6 +348,17 @@ func _test_decisions() -> void:
 		"1.3.0 decision settings move to the decision core")
 
 
+func _test_talk_and_playbook() -> void:
+	check(SpeechBubbles.clean("  Too\nslow!\t ") == "Too slow!", "speech is one clean line")
+	var long_line = ""
+	for _i in range(30):
+		long_line += "abcde"
+	check(SpeechBubbles.clean(long_line).length() == SpeechBubbles.MAX_CHARS and SpeechBubbles.clean(long_line).ends_with("..."), "long speech is cut")
+	var playbook = Prompts.knowledge("playbook")
+	check(playbook.find("What kind of turn is it?") != -1 and playbook.find("Reading look_ahead") != -1, "the playbook covers turn types and look_ahead")
+	check(Prompts.QUICK_START.size() >= 3 and Prompts.QUICK_START[0].find("kind of turn") != -1, "chatbots get a quick start")
+
+
 func _test_sim_turns() -> void:
 	check(SimTurns.relative_direction("NE", 1) == "up-fwd" and SimTurns.relative_direction("NE", -1) == "up-back", "screen directions read relative to the opponent")
 	var aims = SimTurns.variants({"kind": "xy", "default": {"x": 50, "y": 0}}, -1, 1)
@@ -375,6 +388,6 @@ func _test_tool_catalogue() -> void:
 
 
 func _test_knowledge() -> void:
-	for topic in ["gameplay", "engine", "characters", "action-ui", "modding", "annotating"]:
+	for topic in ["gameplay", "playbook", "engine", "characters", "action-ui", "modding", "annotating"]:
 		check(Prompts.knowledge(topic).length() > 200, "knowledge topic %s present" % topic)
 	check(Prompts.annotate_system().find("budok.character.v1") != -1, "annotation prompt includes the format")

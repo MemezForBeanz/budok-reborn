@@ -14,7 +14,7 @@ behind the **budok settings** button in the game's Options window, and in the F8
 
 | Tab | What is there |
 |---|---|
-| **Play** | Who plays P1 and P2, and what each chosen mode still needs; folded: turn rules, simulations, interface and logs. |
+| **Play** | Who plays P1 and P2, and what each chosen mode still needs; folded: turn rules, simulations, interface and logs; Misc: speech bubbles and trash talk. |
 | **Models** | The chat model, the decision core (its models and keys, and the lookahead) and the notes writer, each with its provider, model and key together; folded: the more detailed settings and provider addresses. |
 | **Chatbots** | The MCP server: address, token, copy-paste configs for Claude Desktop and Claude Code. |
 | **Characters** | Character notes, automatic notes, memories and the community registry. |
@@ -138,6 +138,14 @@ Which models:
   and limits" (`convaiinnovations/laya` takes 10 but not 40).
 
 budok 1.3.0 kept one decision model under `ai.decide`; it moves to `ai.core` by itself.
+
+## misc (Play tab, Misc)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `misc.speech_bubbles` | `false` | Bots may say lines in a speech bubble above their character: chatbots with `say` (or `say` on `submit_action`), the chat model with `say` on its move. Decision models can't write. |
+| `misc.trash_talk` | `false` | Bots that can write are asked to trash talk their opponent with every move (playful and about the match). Turns speech bubbles on too. |
+| `misc.bubble_seconds` | `4` | How long a bubble stays up, plus a little per character. |
 
 ## other
 

@@ -7,6 +7,14 @@ extends Reference
 const Util = preload("res://budok/core/Util.gd")
 const Introspector = preload("res://budok/core/Introspector.gd")
 const KNOWLEDGE_DIR := "res://budok/knowledge"
+# The start of a match over MCP: enough direction for a chatbot that never
+# loaded the play_match prompt.
+const QUICK_START := [
+	"Each turn, first decide what kind of turn it is from situation: being hit (DI away or burst), you act first (punish or keep the combo going), neutral (a guess: pick by spacing), they act first (block or get out).",
+	"Then shortlist 2-4 moves from your character's notes (use_when, beats, loses_to; startup and reach against spacing.distance_x), check the risky ones with simulate or look_ahead, mix up, and submit_action.",
+	"look_ahead (when budok's decision core is set up) plays several of your moves several turns deep with fast decision models and answers in a few lines per move: use it in neutral and at turning points, and decide yourself.",
+	"The full playbook: the play_match prompt, or the resource yomi://knowledge/playbook.",
+]
 const TANDEM_PLAY := ("# Tandem: you lead a decision core\nlook_ahead hands the hard work to fast decision models: they play your candidate "
 	+ "moves ahead on the real engine (up to 30 turns, with both fighters' moves chosen by the models) and report back in a few lines. "
 	+ "Use it to compare plans you cannot work out yourself, steer it with focus and opponent_style, then decide and submit. "
@@ -73,6 +81,7 @@ static func play_system(runtime, slot: String) -> String:
 	var parts = [
 		"You are playing YOMI Hustle as %s. Win the match." % slot,
 		knowledge("gameplay"),
+		knowledge("playbook"),
 		"# Your character\n" + character_primer(infos.get(slot, {})),
 		"# Opponent's character\n" + character_primer(infos.get(other, {}), 30),
 	]
@@ -87,7 +96,25 @@ static func play_system(runtime, slot: String) -> String:
 		parts.append("Risk appetite: %s." % risk)
 	if runtime.matches.controllers.get(slot) == "tandem":
 		parts.append(TANDEM_PLAY)
+	var talk = talk_rules(runtime, slot)
+	if talk != "":
+		parts.append("# Talking\n" + talk)
 	return PoolStringArray(parts).join("\n\n")
+
+
+# What a bot may say above its character (Play tab, Misc), or "" when off.
+static func talk_rules(runtime, slot: String) -> String:
+	if runtime.speech == null or not runtime.speech.enabled():
+		return ""
+	if runtime.speech.trash_talk():
+		var other = "p2" if slot == "p1" else "p1"
+		var who = {"human": "a human player", "mcp": "a chatbot", "ai": "an AI", "tandem": "an AI", "decision": "a decision-model bot"}.get(
+			str(runtime.matches.controllers.get(other, "human")), "someone")
+		var character = str(runtime.matches.match_info.get("characters", {}).get(other, {}).get("display_name", "your opponent"))
+		return ("Trash talk is on: with every move, put one short taunt (under 80 characters) in submit_action's `say`; it appears above "
+			+ "your character. Talk to your opponent (%s, played by %s) about the match: what just happened, what is coming, their habits. "
+			+ "Keep it playful and about the game: no slurs and no real-life insults.") % [character, who]
+	return "You can say something above your character with `say` in submit_action (under 80 characters), say after a big hit or a read. It is optional; keep it short and about the game."
 
 
 static func annotate_system() -> String:
@@ -104,8 +131,8 @@ static func play_match_prompt(runtime, slot: String) -> String:
 		play_system(runtime, slot),
 		"# How to play through the budok tools",
 		"1. Call wait_for_turn (slot %s). When status is your_turn you get turn_token, situation, observation, legal_actions and extras." % slot,
-		"2. Optionally describe_character for move notes and simulate 1-3 candidate moves against likely opponent answers. "
-			+ "For deeper questions, look_ahead asks budok's decision core (fast decision models) to play your candidates several turns ahead and report back briefly, without filling your context.",
+		"2. Follow the playbook: decide what kind of turn it is, shortlist 2-4 moves (describe_character has the notes), and check the risky ones: "
+			+ "simulate for one move against one reply, look_ahead to have budok's decision core (fast decision models) compare several moves several turns deep and report back briefly, without filling your context.",
 		"3. Call submit_action with the turn_token. It waits for the turn to resolve and tells you what the opponent did.",
 		"4. Repeat until wait_for_turn returns match_over. Keep each turn's reasoning short. Matches have many turns.",
 		"5. Whenever you learn something worth keeping (how a character really behaves, what works in this matchup), save it with remember; after the match, save the 1-3 most useful lessons.",

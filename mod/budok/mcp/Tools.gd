@@ -8,7 +8,8 @@ extends Reference
 const Util = preload("res://budok/core/Util.gd")
 const MatchStarter = preload("res://budok/core/MatchStarter.gd")
 const DecisionCore = preload("res://budok/ai/DecisionCore.gd")
-const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", "ai.annotate.", "ai.decide.", "ai.core.", "schemas.auto."]
+const Prompts = preload("res://budok/ai/Prompts.gd")
+const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", "ai.annotate.", "ai.decide.", "ai.core.", "schemas.auto.", "misc."]
 # agent_command names a program budok runs, so only the player may set it.
 # Decision-core endpoints carry keys, so they are never changed over MCP.
 const SETTING_BLOCKLIST := ["api_key", "base_url", "auth_token", "agent_command", "endpoints"]
@@ -84,7 +85,10 @@ func _define() -> void:
 		+ "Retrying a move that was already locked in returns ok with already_applied (and the outcome), so a lost reply is safe to retry.",
 		{"turn_token": {"type": "string"}, "action": {"type": "string"}, "data": data, "extra": extra,
 		"wait_for_outcome": {"type": "boolean", "description": "Wait until the turn resolves and report what happened (default true). If it is still pending after timeout_s (the opponent may be a slow human), just call wait_for_turn."},
+		"say": {"type": "string", "description": "Optional line (under 80 characters) shown in a speech bubble above your character, when the player turned speech on in budok's settings."},
 		"timeout_s": {"type": "number", "minimum": 1, "maximum": 50, "description": "Default 20, capped by the mcp.max_wait_s setting."}}, ["turn_token", "action"])
+	_add("say", "Say", "Show a short line (under 80 characters) in a speech bubble above your character, when the player turned speech on in budok's settings (Play tab, Misc). "
+		+ "submit_action's say does the same with your move.", {"slot": slot, "text": {"type": "string"}}, ["text"])
 	_add("get_match_log", "Match log", "Recent turn history (both players' moves after they resolved), decisions and result.",
 		{"last_n": {"type": "integer", "minimum": 1, "maximum": 200}}, [], true)
 	_add("describe_character", "Describe character", "Schema for a character: measured frame data + notes (category, beats, loses_to...).",
@@ -127,7 +131,7 @@ func _define() -> void:
 			"description": "Workers only: wait up to this long for a character to come up (default 0, capped by mcp.max_wait_s)."}}, [], true)
 	_add("finish_schema_task", "Finish schema task", "End your schema task early: done, or skipped: true to hand it back. Tasks also finish by themselves once every move and the summary have notes.",
 		{"character": {"type": "string"}, "skipped": {"type": "boolean"}}, [])
-	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.*, ai.annotate.*, ai.decide.*, ai.core.* (not its endpoints) or schemas.auto.* (no keys or URLs).",
+	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.*, ai.annotate.*, ai.decide.*, ai.core.* (not its endpoints), schemas.auto.* or misc.* (no keys or URLs).",
 		{"path": {"type": "string"}, "value": {}}, ["path", "value"])
 
 
@@ -241,6 +245,7 @@ func _t_start_match(args: Dictionary, sid: String):
 				runtime.matches.claim(slot, sid, true)
 		result["your_slots"] = runtime.matches.slots_of(sid)
 		result["next"] = "call wait_for_turn"
+		result["how_to_play"] = Prompts.QUICK_START
 		runtime.schema_jobs.on_claimed(sid)
 		_add_schema_task(result, sid)
 		_add_notes_hint(result)
@@ -376,9 +381,14 @@ func _t_wait_for_turn(args: Dictionary, sid: String):
 	var view = runtime.matches.turn_view(slot["slot"], str(args.get("detail", "summary")))
 	view["ok"] = true
 	view["status"] = "your_turn"
-	if not runtime.matches.has_decided(slot["slot"]):
+	var first = not runtime.matches.has_decided(slot["slot"])
+	if first:
+		view["how_to_play"] = Prompts.QUICK_START
 		_add_notes_hint(view)
 		_add_memories(view)
+	# Trash talk is asked for every turn; plain speech is mentioned once.
+	if runtime.speech.trash_talk() or (first and runtime.speech.enabled()):
+		view["talk"] = Prompts.talk_rules(runtime, slot["slot"])
 	return view
 
 
@@ -438,6 +448,10 @@ func _t_submit_action(args: Dictionary, sid: String):
 			return owner_check
 	var result = runtime.matches.submit(str(args.get("turn_token", "")), str(args.get("action", "")),
 		args.get("data"), args.get("extra", {}), "mcp:%s" % sid.substr(0, 8))
+	if result["ok"] and str(args.get("say", "")).strip_edges() != "":
+		var said = runtime.speech.say(turn["slot"], str(args["say"]))
+		if not said["ok"]:
+			result["say_note"] = said["error"]
 	if not result["ok"] or not bool(args.get("wait_for_outcome", true)):
 		yield(runtime.get_tree(), "idle_frame")
 		return result
@@ -447,6 +461,13 @@ func _t_submit_action(args: Dictionary, sid: String):
 	result["outcome"] = yield(runtime.matches.wait_outcome(turn["slot"], result["turn_tick"], timeout_s), "completed")
 	result["next"] = "call wait_for_turn"
 	return result
+
+
+func _t_say(args: Dictionary, sid: String) -> Dictionary:
+	var slot = _slot(args, sid)
+	if slot.has("error"):
+		return slot
+	return runtime.speech.say(slot["slot"], str(args.get("text", "")))
 
 
 func _t_get_match_log(args: Dictionary, _sid: String) -> Dictionary:

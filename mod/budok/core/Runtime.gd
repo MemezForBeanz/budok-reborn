@@ -3,7 +3,7 @@ extends Node
 # Wires every budok service together and exposes the in-process API used by
 # MCP tools, the token-mode AI and automation scripts:
 #   runtime.config / roster / schemas / memory / sources / matches / simulator /
-#   lookahead / mcp / llm / autopilot / core / decider / annotator, plus the helpers below.
+#   lookahead / speech / mcp / llm / autopilot / core / decider / annotator, plus the helpers below.
 
 signal status_changed()
 
@@ -27,6 +27,7 @@ const Annotator = preload("res://budok/ai/Annotator.gd")
 const OverlayPanel = preload("res://budok/ui/Panel.gd")
 const ModMenuHook = preload("res://budok/ui/ModMenuHook.gd")
 const OptionsHook = preload("res://budok/ui/OptionsHook.gd")
+const SpeechBubbles = preload("res://budok/ui/SpeechBubbles.gd")
 const Automation = preload("res://budok/automation/Automation.gd")
 const METADATA_PATH := "res://budok/_metadata"
 const BRIDGE_SOURCE := "res://budok/tools/budok_stdio.py"
@@ -51,6 +52,7 @@ var schema_jobs = null
 var panel = null
 var mod_menu = null
 var options_menu = null
+var speech = null
 var automation = null
 var server_state := {}
 var bridge_path := ""
@@ -72,6 +74,8 @@ func _ready() -> void:
 	matches.setup(self)
 	lookahead = _add(Lookahead.new(), "Lookahead")
 	lookahead.setup(self)
+	speech = _add(SpeechBubbles.new(), "Speech")
+	speech.setup(self)
 	llm = _add(LlmClient.new(), "Llm")
 	llm.setup(config)
 	autopilot = _add(AutoPilot.new(), "AutoPilot")

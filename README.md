@@ -49,8 +49,9 @@ with copy buttons for ready-made configs:
   with that URL and token can control your game, so close the tunnel when done.
 
 Then ask your chatbot something like *"Start a match, I'm Ninja on P1, you play Cowboy on P2."* It will
-call `start_match`, loop `wait_for_turn` → `simulate` → `submit_action`, and you play P1 with the normal
-game UI. The `play_match` MCP prompt gives it the rules and both characters' notes. See
+call `start_match`, loop `wait_for_turn` → `simulate` / `look_ahead` → `submit_action`, and you play P1
+with the normal game UI. `start_match` hands it the start of budok's playbook (how to read a turn and pick
+a move); the `play_match` MCP prompt gives it the whole playbook, the rules and both characters' notes. See
 [docs/mcp.md](docs/mcp.md) for every tool.
 
 ## Let the mod play by itself (token mode)
@@ -88,6 +89,12 @@ mode in **Play**:
 
 Jev works with a TypeSafe key (`jev-latest`); through Vercel it needs paid credits, and Vercel's free tier
 offers other decision models at 5 requests a minute. Details: [docs/settings.md](docs/settings.md#aicore-the-decision-core-controllers-decision-and-tandem-mcp-look_ahead).
+
+### Talking bots
+
+In **Play → Misc**, bots can say lines in a speech bubble above their character (chatbots with `say`,
+the chat model with its move), and **trash talk** asks them for a playful taunt with every move. Both are
+off by default; decision models can't write, so they stay quiet.
 
 ## Modded characters
 

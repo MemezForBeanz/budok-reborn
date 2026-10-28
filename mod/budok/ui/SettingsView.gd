@@ -185,6 +185,12 @@ func _play_tab() -> Control:
 	_field(other, "logging.match_logs", "Write match logs", "bool")
 	_field(other, "automation.script", "Automation script (path)", "string")
 	other.add_child(_note("Automation changes apply after restarting the game."))
+	box.add_child(_header("Misc"))
+	_field(box, "misc.trash_talk", "Bots trash talk every turn", "bool")
+	_field(box, "misc.speech_bubbles", "Bots may say lines above their character", "bool")
+	_field(box, "misc.bubble_seconds", "Speech bubble time (s)", "int", [1, 30])
+	box.add_child(_note("Lines appear in a bubble above the character. Chatbots and the chat model can talk (trash talk turns that on too); "
+		+ "decision models can't write."))
 	box.add_child(_buttons([["Save", "_on_save"]]))
 	return _end_tab(box)
 

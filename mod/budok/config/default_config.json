@@ -94,6 +94,11 @@
       "match_start": true
     }
   },
+  "misc": {
+    "speech_bubbles": false,
+    "trash_talk": false,
+    "bubble_seconds": 4
+  },
   "memory": {
     "enabled": true,
     "shown_per_match": 6,
