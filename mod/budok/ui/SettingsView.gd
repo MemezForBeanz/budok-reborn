@@ -174,9 +174,11 @@ func _ai_tab() -> Control:
 	_field(box, "ai.decide.think_s", "Thinking time per turn (s)", "int", [3, 600])
 	_field(box, "ai.decide.request_timeout_s", "Request timeout (s)", "int", [2, 300])
 	_field(box, "ai.decide.frame_budget_ms", "Simulation time per frame (ms; higher thinks faster, game less smooth)", "int", [1, 100])
+	_field(box, "ai.decide.max_rpm", "Requests per minute (0 = no limit; free tiers: 5)", "int", [0, 10000])
 	box.add_child(_hint("Each turn the model ranks your moves and guesses the opponent's, budok plays your best candidates on the real engine "
 		+ "against its likeliest replies, and each line plays on with the model choosing both fighters' moves. A last call picks the move from those results. "
-		+ "One call per turn of each line: depth 10 with 4 lines is about 40 calls a turn."))
+		+ "One call per turn of each line: depth 10 with 4 lines is about 40 calls a turn. Under a requests-per-minute limit "
+		+ "(set here, or learned from the provider's rate-limit errors) the lines get shorter to fit."))
 	box.add_child(_save_row())
 	return _end_tab(box)
 

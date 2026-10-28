@@ -103,11 +103,14 @@ func decide(role: String, state: String, questions: Dictionary, timeout_s: float
 	for attempt in range(2):
 		# Polled on a thread: the lookahead makes many short calls in a row.
 		response = yield(_send(url, headers, Util.json_str(body), timeout, HTTPClient.METHOD_POST, true), "completed")
-		if response["ok"] or not (int(response.get("status", 0)) in RETRY_CODES) or attempt == 1:
+		# Rate limits are left to the caller, which paces its calls (a quick
+		# retry would only use up the next request of a small budget).
+		var status = int(response.get("status", 0))
+		if response["ok"] or status == 429 or not (status in RETRY_CODES) or attempt == 1:
 			break
 		yield(get_tree().create_timer(1.0), "timeout")
 	if not response["ok"]:
-		return {"ok": false, "error": response["error"]}
+		return {"ok": false, "error": response["error"], "status": int(response.get("status", 0))}
 	return parse_decision(response["json"], questions)
 
 

@@ -58,6 +58,7 @@
       "think_s": 30,
       "request_timeout_s": 20,
       "frame_budget_ms": 8,
+      "max_rpm": 0,
       "extra_body": {}
     },
     "annotate": {

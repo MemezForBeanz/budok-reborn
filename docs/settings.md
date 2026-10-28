@@ -84,9 +84,10 @@ probability for each. budok builds the options and the facts, and looks ahead on
 | `candidates` / `replies` | `4` / `3` | Your moves compared, and opponent replies each one is tested against. Every pair gets at least a one-turn line. |
 | `max_options` | `48` | Options per question (the API allows 255). Each move's default input comes first, then other aims, directions or slider values. |
 | `pick` | `sample` | `sample` draws from the last request's probabilities (never options under 10% of the likeliest); `best` takes the likeliest. |
-| `think_s` | `30` | Thinking time per turn. Lines stop in time for the last request; it is kept 5 s under `turns.timeout_s.decision`. |
+| `think_s` | `30` | Thinking time per turn, counted from the first answer (time spent waiting for a free request under a rate limit doesn't count). Lines stop in time for the last request, and everything ends 5 s before `turns.timeout_s.decision`. |
 | `request_timeout_s` | `20` | Per request. |
 | `frame_budget_ms` | `8` | Engine time all lines may use per frame. Higher thinks faster but makes the game less smooth. |
+| `max_rpm` | `0` | Requests per minute to stay under (0 = no limit). budok also learns the limit from the provider's rate-limit errors. Under a limit, deep lines get shorter (down to one turn) so the two requests a turn always needs still fit, and calls inside lines never use the last free request. |
 | `extra_body` | `{}` | Merged into every request body. |
 
 Cost and speed: one request per turn of each deep line, plus two. Depth 10 with 4 lines is about 40
@@ -97,6 +98,17 @@ models (`ai.annotate`, the notes agent); the decision bot only reads them.
 
 Keys: `ai.providers.vercel.api_key` (or `AI_GATEWAY_API_KEY`), `ai.providers.typesafe.api_key` (or
 `TYPESAFE_API_KEY`).
+
+Which model:
+
+- **Jev with a TypeSafe key** (`provider: typesafe`, `model: jev-latest`, or `jev-preview`). TypeSafe's
+  default limit is 80 requests a second, so the full lookahead runs.
+- **Jev through Vercel** (`typesafe-ai/jev`) needs paid AI Gateway credits.
+- **Vercel's free tier** allows 5 requests a minute per model, so set `max_rpm` to 5: each turn then uses
+  the two requests and one-turn lines on the engine. Free-tier models that handled budok's requests well:
+  `baseten/mammoth-1` and `perplexity/pplx-decider-v1.2` (27B), `liquid/d1-ultra`. Some models limit the
+  number of options per question and reject longer lists with "check it against the model's supported
+  inputs and limits" (`convaiinnovations/laya` takes 10 but not 40); lower `max_options` for those.
 
 ## other
 

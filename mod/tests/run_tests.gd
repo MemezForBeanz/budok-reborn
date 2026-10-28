@@ -310,6 +310,10 @@ func _test_decisions() -> void:
 	check(plan.size() == 4 and deep == 3 and plan[0]["candidate"] == 0 and plan[1]["candidate"] == 1 and plan[2]["reply"] == 1,
 		"deep lines spread over candidates, short lines cover the other pairs")
 	check(DecisionPilot._plan([{"label": "A"}], [{"label": "x"}], {"depth": 1, "threads": 4}).size() == 1, "depth 1 only plays the next turn")
+	var rate_cfg = {"depth": 10, "threads": 4, "think_ms": 30000}
+	check(DecisionPilot.depth_for_rate(rate_cfg, 0, 1) == 10, "no rate limit keeps the depth")
+	check(DecisionPilot.depth_for_rate(rate_cfg, 5, 1) == 1, "5 requests a minute leave no calls for deep lines")
+	check(DecisionPilot.depth_for_rate(rate_cfg, 60, 1) == 8 and DecisionPilot.depth_for_rate(rate_cfg, 60, 2) == 4, "deep lines share what the limit allows")
 	var line_results = [{"ok": true, "first": {"dealt": 100, "taken": 0, "ko": ""}, "turns": 1}]
 	var facts = DecisionPilot._facts([{"label": "A", "description": "Slash (Attack)"}], [{"label": "x"}], {"x": 1.0},
 		[{"candidate": 0, "reply": 0, "depth": 1}], line_results)

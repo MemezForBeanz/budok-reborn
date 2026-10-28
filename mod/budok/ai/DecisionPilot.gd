@@ -24,6 +24,7 @@ const NOTE_CHARS := 140
 const MAX_THREADS := 16
 const MAX_DEPTH := 30
 const KO_VALUE := 1000
+const MINUTE_MS := 60000
 
 var runtime = null
 var llm = null
@@ -31,12 +32,22 @@ var stats := {"turns": 0, "fallbacks": 0, "calls": 0, "lines": 0, "sim_ticks": 0
 	"last_error": "", "last_decision": "", "last_think_ms": 0}
 var _busy := {"p1": "", "p2": ""}
 var _rng := RandomNumberGenerator.new()
+# Requests per minute: start times of recent calls (all decision bots), the
+# limit learned from the provider's rate-limit errors, and when it lets us retry.
+var _call_times := []
+var _learned_rpm := 0
+var _blocked_until := 0
+var _limit_regex := RegEx.new()
+var _retry_regex := RegEx.new()
 
 
 func setup(runtime_ref, llm_ref) -> void:
 	runtime = runtime_ref
 	llm = llm_ref
 	_rng.randomize()
+	# Vercel's wording: "this team's limit of 5 requests per minute ... Retry after 48s."
+	_limit_regex.compile("limit of (\\d+) requests per minute")
+	_retry_regex.compile("[Rr]etry after (\\d+) ?s")
 	runtime.matches.connect("turn_opened", self, "_on_turn_opened")
 
 
@@ -52,8 +63,8 @@ func settings() -> Dictionary:
 	var simulate = bool(runtime.config.get_value("simulation.enabled", true))
 	var think_s = clamp(float(cfg.get("think_s", 30)), 3.0, 600.0)
 	var timeout_s = float(runtime.config.get_value("turns.timeout_s.decision", 0))
-	if timeout_s > 0:
-		think_s = clamp(timeout_s - 5.0, 1.0, think_s)
+	# Everything, waits for a free request included, ends 5 s before the turn timeout.
+	var limit_s = timeout_s - 5.0 if timeout_s > 0 else 600.0
 	return {
 		"model": str(cfg.get("model", "")),
 		"depth": int(clamp(Util.as_int(cfg.get("depth", 10)), 0, MAX_DEPTH)) if simulate else 0,
@@ -62,9 +73,31 @@ func settings() -> Dictionary:
 		"replies": int(clamp(Util.as_int(cfg.get("replies", 3)), 1, 8)),
 		"max_options": int(clamp(Util.as_int(cfg.get("max_options", 48)), 2, 255)),
 		"pick": "best" if str(cfg.get("pick", "sample")) == "best" else "sample",
-		"think_ms": int(think_s * 1000.0),
+		"think_ms": int(min(think_s, limit_s) * 1000.0),
+		"limit_ms": int(max(1.0, limit_s) * 1000.0),
 		"request_timeout_s": clamp(float(cfg.get("request_timeout_s", 20)), 2.0, 300.0),
+		"max_rpm": int(max(0, Util.as_int(cfg.get("max_rpm", 0)))),
 	}
+
+
+# Requests per minute allowed (0 = unlimited): the setting or the provider's
+# limit learned from a rate-limit error, whichever is lower.
+func rpm_limit(cfg: Dictionary) -> int:
+	if cfg["max_rpm"] > 0 and _learned_rpm > 0:
+		return int(min(cfg["max_rpm"], _learned_rpm))
+	return cfg["max_rpm"] if cfg["max_rpm"] > 0 else _learned_rpm
+
+
+# Lookahead depth that fits a rate limit: two calls per turn are needed for
+# the first and last questions, the rest go to deep lines (one per turn each).
+static func depth_for_rate(cfg: Dictionary, rpm: int, bots: int) -> int:
+	if rpm <= 0 or cfg["depth"] <= 1:
+		return cfg["depth"]
+	var per_turn = int(rpm * cfg["think_ms"] / MINUTE_MS / max(1, bots))
+	var for_lines = per_turn - 2
+	if for_lines < cfg["threads"]:
+		return 1
+	return int(min(cfg["depth"], 1 + for_lines / cfg["threads"]))
 
 
 func _take_turn(slot: String, token: String) -> void:
@@ -110,9 +143,11 @@ func _take_turn(slot: String, token: String) -> void:
 		_busy[slot] = ""
 
 
-# Coroutine: {"option", "summary"} or {"error"}.
+# Coroutine: {"option", "summary"} or {"error"}. The thinking time starts once
+# the first question is answered, so waiting for a free request under a rate
+# limit doesn't eat the simulations; the turn's time limit still holds.
 func _decide(ctx: Dictionary, mine: Array, theirs: Array, cfg: Dictionary, started: int) -> Dictionary:
-	var deadline = started + cfg["think_ms"]
+	var limit = started + cfg["limit_ms"]
 	var state = _root_state(ctx)
 	var names = _names(ctx)
 	var questions = {"you": {"instructions": ("You are %s (%s) fighting %s in YOMI Hustle, a turn-based fighting game where both players "
@@ -121,9 +156,10 @@ func _decide(ctx: Dictionary, mine: Array, theirs: Array, cfg: Dictionary, start
 	if theirs.size() > 1:
 		questions["opponent"] = {"instructions": "Which move will the opponent, %s, most likely lock in now?" % names["opponent"],
 			"options": _criteria(theirs, ctx, ctx["other"])}
-	var prior = yield(_call(state, questions, deadline, cfg), "completed")
+	var prior = yield(_call(state, questions, limit - int(min(cfg["think_ms"], 10000)), cfg), "completed")
 	if not prior["ok"]:
 		return {"error": prior["error"]}
+	var deadline = int(min(Util.now_ms() + cfg["think_ms"], limit))
 	var my_p = prior["answers"]["you"]["probabilities"]
 	var their_p = prior["answers"]["opponent"]["probabilities"] if prior["answers"].has("opponent") else {theirs[0]["label"]: 1.0}
 	var candidates = _top(mine, my_p, cfg["candidates"])
@@ -131,7 +167,12 @@ func _decide(ctx: Dictionary, mine: Array, theirs: Array, cfg: Dictionary, start
 		var only = _pick(mine, my_p, cfg["pick"])
 		return {"option": only, "summary": "%d%% without simulations" % int(round(my_p[only["label"]] * 100))}
 	var replies = _top(theirs, their_p, cfg["replies"])
-	var lines = _plan(candidates, replies, cfg)
+	var bots = 0
+	for slot in ["p1", "p2"]:
+		bots += 1 if runtime.matches.controllers.get(slot) == "decision" else 0
+	var plan_cfg = cfg.duplicate()
+	plan_cfg["depth"] = depth_for_rate(cfg, rpm_limit(cfg), bots)
+	var lines = _plan(candidates, replies, plan_cfg)
 	# Leave time for the last call.
 	var lines_deadline = deadline - int(min(cfg["request_timeout_s"] * 1000.0, cfg["think_ms"] / 3.0))
 	var results = yield(_run_lines(ctx, lines, cfg, lines_deadline), "completed")
@@ -161,7 +202,8 @@ func _decide(ctx: Dictionary, mine: Array, theirs: Array, cfg: Dictionary, start
 				best = i
 		probabilities[candidates[best]["label"]] = 1.0
 	var chosen = _pick(candidates, probabilities, cfg["pick"])
-	return {"option": chosen, "summary": "%d%%, %d of %d lines played%s" % [int(round(probabilities.get(chosen["label"], 0.0) * 100)), played, lines.size(),
+	return {"option": chosen, "summary": "%d%%, %d of %d lines played%s%s" % [int(round(probabilities.get(chosen["label"], 0.0) * 100)), played, lines.size(),
+		"" if plan_cfg["depth"] == cfg["depth"] else ", depth %d to fit %d requests a minute" % [plan_cfg["depth"], rpm_limit(cfg)],
 		"" if final["ok"] else "; last call failed, picked by simulations"]}
 
 
@@ -221,7 +263,7 @@ func choose(info: Dictionary) -> Dictionary:
 		var mine = side == ctx["slot"]
 		questions["you" if mine else "opponent"] = {"options": _criteria(info["options"][side], {}, side),
 			"instructions": "Pick your best move now." if mine else "Which move will the opponent, %s, most likely lock in now?" % names["opponent"]}
-	var reply = yield(_call(state, questions, info["deadline"], settings()), "completed")
+	var reply = yield(_call(state, questions, info["deadline"], settings(), true), "completed")
 	if not reply["ok"]:
 		return {}
 	var picks = {}
@@ -230,20 +272,58 @@ func choose(info: Dictionary) -> Dictionary:
 	return picks
 
 
-# Coroutine: decide() bounded by the turn's thinking time.
-func _call(state: String, questions: Dictionary, deadline: int, cfg: Dictionary) -> Dictionary:
-	var remaining = (deadline - Util.now_ms()) / 1000.0
-	if remaining < 1.0:
-		yield(get_tree(), "idle_frame")
-		return {"ok": false, "error": "out of thinking time (ai.decide.think_s)"}
-	var reply = yield(llm.decide("decide", state, questions, min(cfg["request_timeout_s"], remaining)), "completed")
-	stats["calls"] += 1
-	if reply["ok"]:
-		stats["input_tokens"] += Util.as_int(reply["usage"].get("input_tokens", 0))
-		stats["output_tokens"] += Util.as_int(reply["usage"].get("output_tokens", 0))
-	else:
+# Coroutine: decide() bounded by the turn's thinking time and the requests-
+# per-minute limit. Calls inside lines never wait for a free request and keep
+# one in reserve, so the turn's last question can still be asked.
+func _call(state: String, questions: Dictionary, deadline: int, cfg: Dictionary, in_line: bool = false) -> Dictionary:
+	yield(get_tree(), "idle_frame")
+	var reply = {}
+	for _attempt in range(2):
+		var wait = _wait_for_request_ms(rpm_limit(cfg), 1 if in_line else 0)
+		if wait > 0:
+			if in_line or Util.now_ms() + wait > deadline - 1000:
+				return {"ok": false, "error": "rate limit: %d requests a minute (provider limit or ai.decide.max_rpm)" % rpm_limit(cfg)}
+			yield(get_tree().create_timer(wait / 1000.0), "timeout")
+		var remaining = (deadline - Util.now_ms()) / 1000.0
+		if remaining < 1.0:
+			return {"ok": false, "error": "out of thinking time (ai.decide.think_s)"}
+		_call_times.append(Util.now_ms())
+		reply = yield(llm.decide("decide", state, questions, min(cfg["request_timeout_s"], remaining)), "completed")
+		stats["calls"] += 1
+		if reply["ok"]:
+			stats["input_tokens"] += Util.as_int(reply["usage"].get("input_tokens", 0))
+			stats["output_tokens"] += Util.as_int(reply["usage"].get("output_tokens", 0))
+			return reply
 		stats["last_error"] = str(reply.get("error", ""))
+		if int(reply.get("status", 0)) != 429:
+			return reply
+		_learn_limit(str(reply.get("error", "")))
+		if in_line:
+			return reply
 	return reply
+
+
+# Milliseconds until a request may be sent, keeping `reserve` requests free.
+func _wait_for_request_ms(rpm: int, reserve: int) -> int:
+	var now = Util.now_ms()
+	while not _call_times.empty() and _call_times[0] <= now - MINUTE_MS:
+		_call_times.pop_front()
+	var wait = int(max(0, _blocked_until - now))
+	if rpm > 0:
+		var allowed = rpm - reserve
+		if allowed <= 0:
+			return MINUTE_MS
+		if _call_times.size() >= allowed:
+			wait = int(max(wait, _call_times[_call_times.size() - allowed] + MINUTE_MS - now))
+	return wait
+
+
+func _learn_limit(error: String) -> void:
+	var limit = _limit_regex.search(error)
+	if limit != null:
+		_learned_rpm = int(limit.get_string(1))
+	var retry = _retry_regex.search(error)
+	_blocked_until = Util.now_ms() + (int(retry.get_string(1)) * 1000 if retry != null else 5000)
 
 
 func _root_state(ctx: Dictionary) -> String:

@@ -79,6 +79,8 @@ several lines play on for up to 30 turns with the model choosing both fighters' 
 picks your move from what those lines showed, and the move is drawn from its probabilities, so the bot
 is hard to read. Lookahead depth (10 by default), how many lines run at once (4), and the thinking time
 are all settings: see [docs/settings.md](docs/settings.md#aidecide-decision-models-controller-decision).
+Vercel's free tier gives other decision models (such as `baseten/mammoth-1`) at 5 requests a minute;
+budok picks up such a limit and plays with a shorter lookahead.
 
 ## Modded characters
 
