@@ -7,9 +7,11 @@ extends Reference
 
 const Util = preload("res://budok/core/Util.gd")
 const MatchStarter = preload("res://budok/core/MatchStarter.gd")
-const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", "ai.annotate.", "ai.decide.", "schemas.auto."]
+const DecisionCore = preload("res://budok/ai/DecisionCore.gd")
+const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", "ai.annotate.", "ai.decide.", "ai.core.", "schemas.auto."]
 # agent_command names a program budok runs, so only the player may set it.
-const SETTING_BLOCKLIST := ["api_key", "base_url", "auth_token", "agent_command"]
+# Decision-core endpoints carry keys, so they are never changed over MCP.
+const SETTING_BLOCKLIST := ["api_key", "base_url", "auth_token", "agent_command", "endpoints"]
 const SESSION_TAKEOVER_MS := 120000
 
 var runtime = null
@@ -50,14 +52,14 @@ func _define() -> void:
 	_add("list_characters", "List characters", "All playable characters (vanilla, newer builds and modded) with schema status.", {}, [], true)
 	_add("start_match", "Start match", "Start a local match. Works from the menu or mid-match (the current match is abandoned).",
 		{"p1": character, "p2": character,
-		"controllers": {"type": "object", "description": "Per-slot controller for this match: human | mcp | ai (chat model with an API key) | decision (decision model such as Jev).",
-			"properties": {"p1": {"type": "string", "enum": ["human", "mcp", "ai", "decision"]}, "p2": {"type": "string", "enum": ["human", "mcp", "ai", "decision"]}}},
+		"controllers": {"type": "object", "description": "Per-slot controller for this match: human | mcp | ai (chat model with an API key) | decision (decision core) | tandem (chat model leading the decision core).",
+			"properties": {"p1": {"type": "string", "enum": ["human", "mcp", "ai", "decision", "tandem"]}, "p2": {"type": "string", "enum": ["human", "mcp", "ai", "decision", "tandem"]}}},
 		"claim": {"type": "string", "enum": ["p1", "p2", "both", "none"], "description": "Slot(s) this session will play (default: every mcp slot)."},
 		"starting_hp": {"type": "integer", "minimum": 50, "description": "Override both players' HP (shorter matches)."},
 		"settings": {"type": "object", "description": "Native match settings: stage_width, game_length, di_enabled, turbo_mode, infinite_resources, one_hit_ko, burst_enabled, always_perfect_parry, char_distance."}},
 		["p1", "p2"])
 	_add("set_controller", "Set controller", "Change who controls a slot right now: human, mcp or ai (the in-game API-key autopilot).",
-		{"slot": slot, "controller": {"type": "string", "enum": ["human", "mcp", "ai", "decision"]}}, ["slot", "controller"])
+		{"slot": slot, "controller": {"type": "string", "enum": ["human", "mcp", "ai", "decision", "tandem"]}}, ["slot", "controller"])
 	_add("claim_slot", "Claim slot", "Take control of a slot for this MCP session (sets its controller to mcp). A slot held by a disconnected or idle (2 min) session is taken over automatically; force takes it from a live one.",
 		{"slot": slot, "force": {"type": "boolean"}}, ["slot"])
 	_add("release_slot", "Release slot", "Give a claimed slot back (the human can play it again).", {"slot": slot}, ["slot"])
@@ -74,6 +76,10 @@ func _define() -> void:
 		"opponent_data": data, "opponent_extra": extra,
 		"ticks": {"type": "integer", "minimum": 10, "maximum": 300, "description": "Max ticks to simulate (default from settings)."}},
 		["action"], true)
+	var look_ahead = DecisionCore.look_ahead_properties()
+	look_ahead["slot"] = slot
+	_add("look_ahead", "Look ahead (decision core)", DecisionCore.LOOK_AHEAD_HELP
+		+ " Needs a decision model in budok's settings (Models tab, Decision core). Takes a few seconds; the result is short.", look_ahead, [])
 	_add("submit_action", "Submit action", "Lock in your move for the turn. Validated against the game; on error nothing is applied and you can retry with the same token. "
 		+ "Retrying a move that was already locked in returns ok with already_applied (and the outcome), so a lost reply is safe to retry.",
 		{"turn_token": {"type": "string"}, "action": {"type": "string"}, "data": data, "extra": extra,
@@ -121,7 +127,7 @@ func _define() -> void:
 			"description": "Workers only: wait up to this long for a character to come up (default 0, capped by mcp.max_wait_s)."}}, [], true)
 	_add("finish_schema_task", "Finish schema task", "End your schema task early: done, or skipped: true to hand it back. Tasks also finish by themselves once every move and the summary have notes.",
 		{"character": {"type": "string"}, "skipped": {"type": "boolean"}}, [])
-	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.*, ai.annotate.*, ai.decide.* or schemas.auto.* (no keys or URLs).",
+	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.*, ai.annotate.*, ai.decide.*, ai.core.* (not its endpoints) or schemas.auto.* (no keys or URLs).",
 		{"path": {"type": "string"}, "value": {}}, ["path", "value"])
 
 
@@ -405,6 +411,22 @@ func _t_simulate(args: Dictionary, sid: String):
 		{"action": str(args.get("action", "")), "data": args.get("data"), "extra": args.get("extra", {}), "then": args.get("then", [])},
 		theirs, Util.as_int(args.get("ticks", 0))), "completed")
 	return result
+
+
+func _t_look_ahead(args: Dictionary, sid: String):
+	var slot = _slot(args, sid, false)
+	if slot.has("error"):
+		yield(runtime.get_tree(), "idle_frame")
+		return slot
+	if not bool(runtime.config.get_value("simulation.enabled", true)):
+		yield(runtime.get_tree(), "idle_frame")
+		return {"ok": false, "error": "simulation is disabled in settings"}
+	var timeout_s = float(runtime.config.get_value("turns.timeout_s.mcp", 0))
+	var turn = runtime.matches.turns.get(slot["slot"])
+	var limit = Util.now_ms() + 600000
+	if timeout_s > 0 and turn != null:
+		limit = turn["opened_ms"] + int(max(5.0, timeout_s - 10.0) * 1000.0)
+	return yield(runtime.core.look_ahead(slot["slot"], args, limit), "completed")
 
 
 func _t_submit_action(args: Dictionary, sid: String):

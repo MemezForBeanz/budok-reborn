@@ -208,7 +208,7 @@ func _apply(ctx: Dictionary, sim, side: String, option: Dictionary, moves: Dicti
 # limit ("stuck") or the preview being freed ("gone").
 func _tick_to_decision(sim, max_ticks: int) -> String:
 	yield(get_tree(), "idle_frame")
-	var budget_usec = int(clamp(float(runtime.config.get_value("ai.decide.frame_budget_ms", 8)), 1.0, 100.0) * 1000.0)
+	var budget_usec = int(clamp(float(runtime.config.get_value("ai.core.frame_budget_ms", 8)), 1.0, 100.0) * 1000.0)
 	for ticks in range(max_ticks):
 		while _spent_this_frame() >= budget_usec:
 			yield(get_tree(), "idle_frame")

@@ -35,7 +35,7 @@ The skeleton gets a **fingerprint**. When the mod changes the character, stored 
 
 Write notes only. budok measures everything else. Easiest path:
 
-1. Start a match with your character in game, open budok's panel → Characters → **Generate with AI**
+1. Start a match with your character in game, open budok's panel → Characters → **Write notes with AI**
    (or ask a connected chatbot to run the `annotate_character` prompt). Fix anything you disagree with.
 2. **Export** writes the file to `user://budok/export/<Character>.budok.json`.
 3. Ship it next to your character scene as `<Scene>.budok.json`.

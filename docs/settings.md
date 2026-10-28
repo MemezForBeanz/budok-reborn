@@ -9,7 +9,15 @@ Defaults ship in `mod/budok/config/default_config.json`. Your changes are saved 
 | macOS | `~/Library/Application Support/YourOnlyMoveIsHUSTLE/budok/config.json` |
 | Linux | `~/.local/share/YourOnlyMoveIsHUSTLE/budok/config.json` |
 
-Every setting below can be edited in game, under **main menu → Mod List → budok** (or the F8 overlay).
+Every setting below can be edited in game. The same four tabs appear under **main menu → Mod List → budok**,
+behind the **budok settings** button in the game's Options window, and in the F8 overlay:
+
+| Tab | What is there |
+|---|---|
+| **Play** | Who plays P1 and P2, and what each chosen mode still needs; folded: turn rules, simulations, interface and logs. |
+| **Models** | The chat model, the decision core (its models and keys, and the lookahead) and the notes writer, each with its provider, model and key together; folded: the more detailed settings and provider addresses. |
+| **Chatbots** | The MCP server: address, token, copy-paste configs for Claude Desktop and Claude Code. |
+| **Characters** | Character notes, automatic notes, memories and the community registry. |
 
 ## mcp
 
@@ -28,8 +36,8 @@ Every setting below can be edited in game, under **main menu → Mod List → bu
 |---|---|---|
 | `controllers.p1` / `.p2` | `human` / `mcp` | Default controller for matches you start from the game menu. |
 | `turns.forced_turns` | `skip_unless_hurt` | Auto-submit Hold when it is the only option: `never`, `skip_unless_hurt` (keeps DI decisions) or `always`. |
-| `controllers.*` values | | `human` (you), `mcp` (a connected chatbot), `ai` (chat model with your API key, `ai.play`) or `decision` (decision model such as Jev, `ai.decide`). |
-| `turns.timeout_s.mcp` / `.ai` / `.decision` | `0` / `120` / `120` | Seconds before a bot-controlled turn falls back (0 = wait forever). |
+| `controllers.*` values | | `human` (you), `mcp` (a connected chatbot), `ai` (chat model with your API key, `ai.play`), `decision` (the decision core) or `tandem` (the chat model leading the decision core). |
+| `turns.timeout_s.mcp` / `.ai` / `.decision` / `.tandem` | `0` / `120` / `120` / `180` | Seconds before a bot-controlled turn falls back (0 = wait forever). |
 | `turns.fallback_action` | `Continue` | Move played on timeout or AI failure. It must be legal; otherwise Continue is used. |
 | `turns.hide_bot_panel` | `true` | Hide a bot's move panel so it can't be clicked by accident. |
 | `turns.history_length` | `12` | Turns of history shown to bots. |
@@ -61,54 +69,75 @@ Keys: `ai.providers.<name>.api_key`, or the environment variable in `api_key_env
 (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`). `ai.providers.local.base_url` points at any
 OpenAI-compatible server (default Ollama, `http://127.0.0.1:11434/v1`).
 
-## ai.decide: decision models (controller `decision`)
+## ai.core: the decision core (controllers `decision` and `tandem`, MCP `look_ahead`)
 
 Decision models such as TypeSafe's Jev don't chat: they pick one of a fixed list of options and give a
-probability for each. budok builds the options and the facts, and looks ahead on the real engine. Each turn:
+probability for each. The decision core puts one or more of them behind one dispatcher and uses them to
+look ahead on the real engine. For one turn:
 
-1. One request ranks your moves and predicts the opponent's (two questions, one request).
-2. Your `candidates` likeliest moves are played on the engine against the opponent's `replies` likeliest
-   replies, up to the next decision point.
-3. `threads` lines play on from there for `depth` turns in all. At every decision point inside a line the
-   model picks both fighters' moves, and the picks are drawn from its probabilities so lines differ.
-4. A last request picks among the candidates, each now described with what the engine showed. The move
-   is drawn from its probabilities (`pick: sample`, so the bot is hard to read) or is the likeliest
-   (`pick: best`).
+1. Unless the caller named them, one request ranks your moves and predicts the opponent's (two questions,
+   one request).
+2. Your `candidates` moves are played on the engine against `replies` opponent replies, up to the next
+   decision point.
+3. Deep lines (one per parallel request the core has) play on from there for `depth` turns in all. At
+   every decision point inside a line the models pick both fighters' moves, drawn from their
+   probabilities so lines differ.
+4. A last request ranks the candidates, each now described with what the engine showed.
+
+Who uses it:
+
+- **`decision` controller**: plays the move drawn from that ranking (`ai.decide.pick: sample`, so the
+  bot is hard to read) or the top one (`best`).
+- **`tandem` controller**: the chat model (`ai.play`) plays and calls the `look_ahead` tool, naming the
+  moves and replies to test, how deep to look and a `focus` / `opponent_style` that steer the imagined
+  lines. It gets a few lines per move back and decides itself, so the lookahead never fills its context.
+- **MCP chatbots**: the same `look_ahead` tool (see [mcp.md](mcp.md)).
+
+`ai.core.endpoints` is a list; each entry is one model with its own key:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `provider` | `vercel` | `vercel` (AI Gateway, `ai.providers.vercel`) or `typesafe` (TypeSafe's own API, `ai.providers.typesafe`). |
-| `model` | `typesafe-ai/jev` | Decision model ID. With `typesafe`, a TypeSafe model such as `jev-latest` (empty uses TypeSafe's default). |
-| `depth` | `10` | Turns each line plays, counting the move being chosen (up to 30). `1` only plays the next turn for each candidate and reply; `0` turns simulations off, so the first request decides. |
-| `threads` | `4` | Lines that go deep, run at the same time (up to 16). They are spread over the candidates. |
+| `provider` | `typesafe` | `typesafe` (TypeSafe's own API) or `vercel` (AI Gateway). |
+| `model` | `jev-latest` | `jev-latest` or `jev-preview` on TypeSafe; any decision model ID on Vercel (`typesafe-ai/jev`, `baseten/mammoth-1`...). |
+| `api_key` | `""` | This entry's key. Empty uses the provider's shared key (`ai.providers.<provider>.api_key`, or `TYPESAFE_API_KEY` / `AI_GATEWAY_API_KEY`). |
+| `threads` | `4` | Requests this entry may have running at once. The core's parallel requests are the sum over all entries, and that many deep lines run at a time. |
+| `max_rpm` | `0` | Requests per minute to stay under (0 = no limit). budok also learns a limit from the provider's rate-limit errors. |
+| `enabled` | `true` | Off keeps the entry but sends it nothing. |
+
+A request goes to the first entry (in list order) with a free slot, so put the best model first; more
+entries, or the same model with more keys, add capacity. An entry that fails passes the request to the
+next one; a rejected key (401/403) sits out for five minutes, other errors for ten seconds. Under a rate
+limit the deep lines get shorter so the requests a turn needs still fit, and requests inside lines never
+use an entry's last free request.
+
+Lookahead settings (also `ai.core`):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `depth` | `10` | Turns each deep line plays, counting the move being chosen (up to 30). `1` only plays the next turn for each candidate and reply; `0` turns simulations off, so the first request decides. |
 | `candidates` / `replies` | `4` / `3` | Your moves compared, and opponent replies each one is tested against. Every pair gets at least a one-turn line. |
-| `max_options` | `48` | Options per question (the API allows 255). Each move's default input comes first, then other aims, directions or slider values. |
-| `pick` | `sample` | `sample` draws from the last request's probabilities (never options under 10% of the likeliest); `best` takes the likeliest. |
-| `think_s` | `30` | Thinking time per turn, counted from the first answer (time spent waiting for a free request under a rate limit doesn't count). Lines stop in time for the last request, and everything ends 5 s before `turns.timeout_s.decision`. |
+| `max_options` | `48` | Options per question (the API allows 255). Each move's default input comes first, then other aims, directions or slider values. Lower it for models that reject long lists. |
+| `think_s` | `30` | Thinking time per turn, counted from the first answer (waiting for a free request doesn't count). Everything ends 5 s before the turn timeout. |
 | `request_timeout_s` | `20` | Per request. |
 | `frame_budget_ms` | `8` | Engine time all lines may use per frame. Higher thinks faster but makes the game less smooth. |
-| `max_rpm` | `0` | Requests per minute to stay under (0 = no limit). budok also learns the limit from the provider's rate-limit errors. Under a limit, deep lines get shorter (down to one turn) so the two requests a turn always needs still fit, and calls inside lines never use the last free request. |
-| `extra_body` | `{}` | Merged into every request body. |
 
-Cost and speed: one request per turn of each deep line, plus two. Depth 10 with 4 lines is about 40
-requests a turn for each decision bot; depth 30 with 8 lines is about 240. Each line also needs its own
-copy of the match (about 80 ms of engine work each), and engine time per frame is capped, so a turn takes
-several seconds even with an instant model. Character notes and post-match lessons still come from chat
-models (`ai.annotate`, the notes agent); the decision bot only reads them.
+`ai.decide.pick` (`sample` or `best`) only affects the decision controller.
 
-Keys: `ai.providers.vercel.api_key` (or `AI_GATEWAY_API_KEY`), `ai.providers.typesafe.api_key` (or
-`TYPESAFE_API_KEY`).
+Cost and speed: one request per turn of each deep line, plus two. Depth 10 with 4 parallel requests is
+about 40 requests a turn. With Jev that took 7-9 s a turn in testing. Each line also needs its own copy of
+the match (about 80 ms of engine work), so a turn takes a few seconds even with an instant model.
 
-Which model:
+Which models:
 
-- **Jev with a TypeSafe key** (`provider: typesafe`, `model: jev-latest`, or `jev-preview`). TypeSafe's
-  default limit is 80 requests a second, so the full lookahead runs.
+- **Jev with a TypeSafe key**: TypeSafe's default limit is 80 requests a second, so the full lookahead runs.
 - **Jev through Vercel** (`typesafe-ai/jev`) needs paid AI Gateway credits.
-- **Vercel's free tier** allows 5 requests a minute per model, so set `max_rpm` to 5: each turn then uses
-  the two requests and one-turn lines on the engine. Free-tier models that handled budok's requests well:
-  `baseten/mammoth-1` and `perplexity/pplx-decider-v1.2` (27B), `liquid/d1-ultra`. Some models limit the
-  number of options per question and reject longer lists with "check it against the model's supported
-  inputs and limits" (`convaiinnovations/laya` takes 10 but not 40); lower `max_options` for those.
+- **Vercel's free tier** allows 5 requests a minute per model: set `max_rpm` to 5. Free-tier models that
+  handled budok's requests well: `baseten/mammoth-1` and `perplexity/pplx-decider-v1.2` (27B),
+  `liquid/d1-ultra`. A free model also works as an overflow entry behind Jev. Some models limit the number
+  of options per question and reject longer lists with "check it against the model's supported inputs
+  and limits" (`convaiinnovations/laya` takes 10 but not 40).
+
+budok 1.3.0 kept one decision model under `ai.decide`; it moves to `ai.core` by itself.
 
 ## other
 

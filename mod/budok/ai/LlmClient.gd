@@ -6,12 +6,13 @@ extends Node
 #   openai / openrouter / local  - OpenAI-compatible /chat/completions
 #   vercel                       - AI Gateway decision models (/decision-model)
 #   typesafe                     - TypeSafe's API for Jev (/v1/systemone)
-# Each role (ai.play, ai.annotate, ai.decide) picks its own provider, model and limits.
+# Each chat role (ai.play, ai.annotate) picks its own provider, model and limits;
+# decision models are endpoints of the decision core (ai.core.endpoints).
 #
 # chat() is a coroutine returning:
 #   {"ok", "provider", "assistant": <message to append verbatim>, "text",
 #    "tool_calls": [{"id", "name", "input"}], "stop_reason", "usage", "error"?}
-# decide() is a coroutine returning:
+# decide_with() is a coroutine returning:
 #   {"ok", "answers": {name: {"choice", "probabilities": {label: p}}}, "usage", "error"?}
 
 const Util = preload("res://budok/core/Util.gd")
@@ -35,7 +36,7 @@ func setup(config_ref) -> void:
 
 func describe_role(role: String) -> Dictionary:
 	var cfg = config.get_value("ai." + role, {})
-	var provider = str(cfg.get("provider", "vercel" if role == "decide" else "anthropic"))
+	var provider = str(cfg.get("provider", "anthropic"))
 	return {
 		"provider": provider,
 		"model": str(cfg.get("model", "")),
@@ -63,32 +64,26 @@ func chat(role: String, system: String, messages: Array, tools: Array) -> Dictio
 	return _parse_anthropic(response["json"]) if provider == "anthropic" else _parse_openai(response["json"])
 
 
-# Coroutine: one call to a decision model (ai.<role>, provider vercel or
-# typesafe). It answers every question at once against the same state by
-# picking one of the question's options, with a probability for each.
+# Coroutine: one call to a decision-model endpoint ({provider: vercel or
+# typesafe, model, key, base_url}; DecisionCore resolves them). It answers
+# every question at once against the same state by picking one of the
+# question's options, with a probability for each.
 # questions: {name: {"instructions": text, "options": {label: description}}}.
-func decide(role: String, state: String, questions: Dictionary, timeout_s: float = 0.0) -> Dictionary:
+func decide_with(endpoint: Dictionary, state: String, questions: Dictionary, timeout_s: float) -> Dictionary:
 	yield(get_tree(), "idle_frame")
-	var cfg = config.get_value("ai." + role, {})
-	var provider = str(cfg.get("provider", "vercel"))
+	var provider = str(endpoint.get("provider", ""))
+	var model = str(endpoint.get("model", ""))
 	if not (provider in DECISION_PROVIDERS):
-		return {"ok": false, "error": "ai.%s.provider must be one of %s" % [role, str(DECISION_PROVIDERS)]}
-	var key = config.api_key(provider)
-	if key == "":
-		return {"ok": false, "error": "no API key for provider '%s': set it in the budok settings (Providers) or the %s environment variable" % [
-			provider, config.get_value("ai.providers.%s.api_key_env" % provider, "?")]}
-	var model = str(cfg.get("model", ""))
-	if model == "" and provider == "vercel":
-		return {"ok": false, "error": "set ai.%s.model to a decision model id, such as typesafe-ai/jev" % role}
-	# The model id is sent as a header (and can be set over MCP).
+		return {"ok": false, "error": "decision provider must be one of %s" % str(DECISION_PROVIDERS)}
+	# The model id is sent as a header.
 	if model.find("\n") != -1 or model.find("\r") != -1:
-		return {"ok": false, "error": "ai.%s.model must be a single line" % role}
+		return {"ok": false, "error": "the model name must be a single line"}
 	var wire = {}
 	for name in questions:
 		wire[name] = {"type": "choice", "instructions": questions[name]["instructions"], "criteria": questions[name]["options"]}
-	var base = str(config.get_value("ai.providers.%s.base_url" % provider, "")).trim_suffix("/")
+	var base = str(endpoint.get("base_url", "")).trim_suffix("/")
 	var url = base + "/v1/systemone"
-	var headers = ["content-type: application/json", "authorization: Bearer " + key]
+	var headers = ["content-type: application/json", "authorization: Bearer " + str(endpoint.get("key", ""))]
 	var body = {"state": state, "questions": wire}
 	if provider == "vercel":
 		url = base + "/decision-model"
@@ -97,12 +92,10 @@ func decide(role: String, state: String, questions: Dictionary, timeout_s: float
 		body = {"stateParts": [{"type": "text", "text": state}], "questions": wire}
 	elif model != "":
 		body["model"] = model
-	_merge_extra(body, cfg)
-	var timeout = timeout_s if timeout_s > 0.0 else float(cfg.get("request_timeout_s", 20))
 	var response = {}
 	for attempt in range(2):
 		# Polled on a thread: the lookahead makes many short calls in a row.
-		response = yield(_send(url, headers, Util.json_str(body), timeout, HTTPClient.METHOD_POST, true), "completed")
+		response = yield(_send(url, headers, Util.json_str(body), timeout_s, HTTPClient.METHOD_POST, true), "completed")
 		# Rate limits are left to the caller, which paces its calls (a quick
 		# retry would only use up the next request of a small budget).
 		var status = int(response.get("status", 0))

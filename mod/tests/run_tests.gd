@@ -15,7 +15,11 @@ const Memory = preload("res://budok/core/Memory.gd")
 const NotesAgent = preload("res://budok/core/NotesAgent.gd")
 const LlmClient = preload("res://budok/ai/LlmClient.gd")
 const SimTurns = preload("res://budok/core/SimTurns.gd")
+const DecisionCore = preload("res://budok/ai/DecisionCore.gd")
 const DecisionPilot = preload("res://budok/ai/DecisionPilot.gd")
+const Config = preload("res://budok/core/Config.gd")
+# Preloaded so a parse error in the settings UI fails the tests.
+const SettingsView = preload("res://budok/ui/SettingsView.gd")
 const Lookahead = preload("res://budok/core/Lookahead.gd")
 
 var failures := 0
@@ -301,23 +305,45 @@ func _test_decisions() -> void:
 	var options = []
 	for label in ["A", "B", "C", "D"]:
 		options.append({"label": label})
-	var ranked = DecisionPilot._top(options, {"A": 0.1, "B": 0.5, "C": 0.3, "D": 0.1}, 2)
+	var ranked = DecisionCore._top(options, {"A": 0.1, "B": 0.5, "C": 0.3, "D": 0.1}, 2)
 	check(ranked.size() == 2 and ranked[0]["label"] == "B" and ranked[1]["label"] == "C", "candidates are the likeliest options")
-	var plan = DecisionPilot._plan([{"label": "A"}, {"label": "B"}], [{"label": "x"}, {"label": "y"}], {"depth": 10, "threads": 3})
+	var plan = DecisionCore.plan([{"label": "A"}, {"label": "B"}], [{"label": "x"}, {"label": "y"}], 10, 3)
 	var deep = 0
 	for line in plan:
 		deep += 1 if line["depth"] == 10 else 0
 	check(plan.size() == 4 and deep == 3 and plan[0]["candidate"] == 0 and plan[1]["candidate"] == 1 and plan[2]["reply"] == 1,
 		"deep lines spread over candidates, short lines cover the other pairs")
-	check(DecisionPilot._plan([{"label": "A"}], [{"label": "x"}], {"depth": 1, "threads": 4}).size() == 1, "depth 1 only plays the next turn")
-	var rate_cfg = {"depth": 10, "threads": 4, "think_ms": 30000}
-	check(DecisionPilot.depth_for_rate(rate_cfg, 0, 1) == 10, "no rate limit keeps the depth")
-	check(DecisionPilot.depth_for_rate(rate_cfg, 5, 1) == 1, "5 requests a minute leave no calls for deep lines")
-	check(DecisionPilot.depth_for_rate(rate_cfg, 60, 1) == 8 and DecisionPilot.depth_for_rate(rate_cfg, 60, 2) == 4, "deep lines share what the limit allows")
+	check(DecisionCore.plan([{"label": "A"}], [{"label": "x"}], 1, 4).size() == 1, "depth 1 only plays the next turn")
+	check(DecisionCore.depth_for_rate(10, 4, 0, 30000, 1) == 10, "no rate limit keeps the depth")
+	check(DecisionCore.depth_for_rate(10, 4, 5, 30000, 1) == 1, "5 requests a minute leave no calls for deep lines")
+	check(DecisionCore.depth_for_rate(10, 4, 60, 30000, 1) == 8 and DecisionCore.depth_for_rate(10, 4, 60, 30000, 2) == 4, "deep lines share what the limit allows")
+	check(DecisionCore.depth_for_rate(10, 4, 60, 30000, 1, 0) == 8 and DecisionCore.depth_for_rate(10, 4, 20, 30000, 1, 0) == 3,
+		"look-aheads without their own questions keep more for lines")
 	var line_results = [{"ok": true, "first": {"dealt": 100, "taken": 0, "ko": ""}, "turns": 1}]
-	var facts = DecisionPilot._facts([{"label": "A", "description": "Slash (Attack)"}], [{"label": "x"}], {"x": 1.0},
+	var facts = DecisionCore.facts([{"label": "A", "description": "Slash (Attack)", "input": null}], [{"label": "x"}], {"x": 1.0},
 		[{"candidate": 0, "reply": 0, "depth": 1}], line_results)
 	check(facts[0]["text"].find("vs x (100% likely): you deal 100, take 0") != -1 and facts[0]["score"] == 100.0, "simulation facts describe each candidate")
+	var summary = DecisionCore.summarize({"candidates": facts, "replies": [{"option": {"label": "x"}, "p": 1.0}], "ranking": {"A": 1.0}, "depth": 1,
+		"lines_played": 1, "lines_planned": 1})
+	check(summary["decision_model_recommends"] == "A" and summary["moves"][0]["next_turn"][0].find("vs x (100%): deal 100, take 0") != -1,
+		"look_ahead answers in a few short lines")
+	check(DecisionCore._problem({"enabled": true, "provider": "typesafe", "key": "", "model": "jev-latest"}) == "no API key"
+		and DecisionCore._problem({"enabled": true, "provider": "vercel", "key": "k", "model": ""}) == "no model"
+		and DecisionCore._problem({"enabled": true, "provider": "typesafe", "key": "k", "model": ""}) == ""
+		and DecisionCore._problem({"enabled": false, "provider": "typesafe", "key": "k", "model": ""}) == "turned off", "unusable decision endpoints are explained")
+	var state = {"call_times": [], "blocked_until": 0}
+	for i in range(4):
+		state["call_times"].append(Util.now_ms() - 1000 * (4 - i))
+	check(DecisionCore._rate_wait_ms(state, 5, 0) == 0 and DecisionCore._rate_wait_ms(state, 5, 1) > 50000, "a line keeps the last free request in reserve")
+	var config = Config.new()
+	config.data = {"ai": {"core": {"endpoints": [{"model": "jev-latest", "api_key": "secret"}]}, "providers": {"x": {"api_key": "y"}}}}
+	var redacted = config.redacted()
+	check(redacted["ai"]["core"]["endpoints"][0]["api_key"] == "(set)" and redacted["ai"]["providers"]["x"]["api_key"] == "(set)", "keys inside lists are hidden too")
+	config._user = {"ai": {"decide": {"provider": "typesafe", "model": "jev-latest", "depth": 6, "threads": 2, "pick": "best"}}}
+	config.data = Util.deep_merge({"ai": {"decide": {"pick": "sample"}, "core": {"depth": 10, "endpoints": []}}}, config._user)
+	check(config._migrate_decision_settings() and config.get_value("ai.core.depth") == 6 and config.get_value("ai.core.endpoints")[0]["model"] == "jev-latest"
+		and config.get_value("ai.core.endpoints")[0]["threads"] == 2 and config.get_value("ai.decide.pick") == "best" and not config.get_value("ai.decide").has("model"),
+		"1.3.0 decision settings move to the decision core")
 
 
 func _test_sim_turns() -> void:

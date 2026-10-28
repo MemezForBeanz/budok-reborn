@@ -1,13 +1,17 @@
 extends Node
 
-# Token mode: plays every slot whose controller is "ai" with the model set in
-# ai.play. Each turn is a fresh short conversation (stable cached system
-# prompt + this turn's situation) in which the model may simulate candidate
-# moves and look up move notes before it must call submit_action. Memory across
+# Token mode: plays every slot whose controller is "ai" or "tandem" with the
+# model set in ai.play. Each turn is a fresh short conversation (stable cached
+# system prompt + this turn's situation) in which the model may simulate
+# candidate moves and look up move notes before it must call submit_action.
+# In Tandem mode it also leads the decision core (look_ahead), which plays its
+# candidates many turns ahead without using the model's context. Memory across
 # turns is the match history plus the model's own one-line notes.
 
 const Util = preload("res://budok/core/Util.gd")
 const Prompts = preload("res://budok/ai/Prompts.gd")
+const DecisionCore = preload("res://budok/ai/DecisionCore.gd")
+const CONTROLLERS := ["ai", "tandem"]
 const REMEMBER_HELP := ("Save one lesson for future matches (kept in this game install and shown to every bot later). "
 	+ "about: opponent (their character), matchup (your character against theirs), self (your character) or general.")
 const SIMULATE_HELP := ("Preview one of your legal moves on the real engine against an assumed opponent move (omit opponent_action to assume they hold). "
@@ -43,14 +47,17 @@ func _on_match_started(_info) -> void:
 
 
 func _on_turn_opened(slot: String, token: String) -> void:
-	if runtime.matches.controllers.get(slot) != "ai" or _busy[slot] == token:
+	if not (runtime.matches.controllers.get(slot) in CONTROLLERS) or _busy[slot] == token:
 		return
 	_busy[slot] = token
 	_take_turn(slot, token)
 
 
-func _tools() -> Array:
+func _tools(slot: String) -> Array:
 	var tools = []
+	if runtime.matches.controllers.get(slot) == "tandem":
+		tools.append({"name": "look_ahead", "description": DecisionCore.LOOK_AHEAD_HELP,
+			"parameters": {"type": "object", "properties": DecisionCore.look_ahead_properties()}})
 	if bool(runtime.config.get_value("ai.play.allow_simulation", true)) and bool(runtime.config.get_value("simulation.enabled", true)):
 		tools.append({
 			"name": "simulate",
@@ -93,7 +100,7 @@ func _take_turn(slot: String, token: String) -> void:
 	var max_steps = int(cfg.get("max_steps", 6))
 	var max_sims = int(cfg.get("max_simulations", 3))
 	var messages = [llm.user_message(_turn_prompt(slot, view, max_sims))]
-	var tools = _tools()
+	var tools = _tools(slot)
 	var simulations = 0
 	var submitted = false
 	for _step in range(max_steps):
@@ -126,6 +133,8 @@ func _take_turn(slot: String, token: String) -> void:
 							"extra": input.get("extra", {})}, theirs, 0), "completed")
 				"describe_moves":
 					output = _describe(slot, str(input.get("who", "me")), input.get("moves", []))
+				"look_ahead":
+					output = yield(runtime.core.look_ahead(slot, input, _look_ahead_limit(token)), "completed")
 				"remember":
 					output = _save_memory(slot, input)
 				"submit_action":
@@ -156,7 +165,7 @@ func _on_match_ended(result) -> void:
 	if not bool(runtime.config.get_value("ai.play.reflect_after_match", true)) or not bool(runtime.config.get_value("memory.enabled", true)):
 		return
 	for slot in ["p1", "p2"]:
-		if runtime.matches.controllers.get(slot) == "ai":
+		if runtime.matches.controllers.get(slot) in CONTROLLERS:
 			_reflect(slot, result, _notes[slot].duplicate())
 
 
@@ -222,8 +231,21 @@ func _turn_prompt(slot: String, view: Dictionary, max_sims: int) -> String:
 	]
 	if not _notes[slot].empty():
 		parts.append("Your recent notes: " + PoolStringArray(_notes[slot]).join(" | "))
-	parts.append("You may simulate up to %d candidates, then call submit_action exactly once. Be brief." % max_sims)
+	if runtime.matches.controllers.get(slot) == "tandem":
+		parts.append("You may use look_ahead (the decision core) and simulate up to %d candidates, then call submit_action exactly once. Be brief." % max_sims)
+	else:
+		parts.append("You may simulate up to %d candidates, then call submit_action exactly once. Be brief." % max_sims)
 	return PoolStringArray(parts).join("\n")
+
+
+# A look_ahead must end in time for the model to read it and submit: 20 s
+# before the turn timeout (turns.timeout_s.<controller>).
+func _look_ahead_limit(token: String) -> int:
+	var turn = runtime.matches.turn_for_token(token)
+	var timeout_s = float(runtime.config.get_value("turns.timeout_s." + str(runtime.matches.controllers.get(turn["slot"] if turn != null else "p1")), 0))
+	if turn == null or timeout_s <= 0:
+		return Util.now_ms() + 600000
+	return turn["opened_ms"] + int(max(5.0, timeout_s - 20.0) * 1000.0)
 
 
 func _describe(slot: String, who: String, moves) -> Dictionary:

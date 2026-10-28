@@ -7,6 +7,10 @@ extends Reference
 const Util = preload("res://budok/core/Util.gd")
 const Introspector = preload("res://budok/core/Introspector.gd")
 const KNOWLEDGE_DIR := "res://budok/knowledge"
+const TANDEM_PLAY := ("# Tandem: you lead a decision core\nlook_ahead hands the hard work to fast decision models: they play your candidate "
+	+ "moves ahead on the real engine (up to 30 turns, with both fighters' moves chosen by the models) and report back in a few lines. "
+	+ "Use it to compare plans you cannot work out yourself, steer it with focus and opponent_style, then decide and submit. "
+	+ "One or two look_ahead calls per turn are plenty; skip it when the choice is obvious.")
 
 
 static func knowledge(topic: String) -> String:
@@ -61,6 +65,7 @@ static func character_primer(info: Dictionary, max_moves: int = 60) -> String:
 	return PoolStringArray(lines).join("\n")
 
 
+
 static func play_system(runtime, slot: String) -> String:
 	var infos = runtime.matches.infos()
 	var other = "p2" if slot == "p1" else "p1"
@@ -80,6 +85,8 @@ static func play_system(runtime, slot: String) -> String:
 	var risk = str(play_cfg.get("risk", "balanced"))
 	if risk != "balanced":
 		parts.append("Risk appetite: %s." % risk)
+	if runtime.matches.controllers.get(slot) == "tandem":
+		parts.append(TANDEM_PLAY)
 	return PoolStringArray(parts).join("\n\n")
 
 
@@ -97,7 +104,8 @@ static func play_match_prompt(runtime, slot: String) -> String:
 		play_system(runtime, slot),
 		"# How to play through the budok tools",
 		"1. Call wait_for_turn (slot %s). When status is your_turn you get turn_token, situation, observation, legal_actions and extras." % slot,
-		"2. Optionally describe_character for move notes and simulate 1-3 candidate moves against likely opponent answers.",
+		"2. Optionally describe_character for move notes and simulate 1-3 candidate moves against likely opponent answers. "
+			+ "For deeper questions, look_ahead asks budok's decision core (fast decision models) to play your candidates several turns ahead and report back briefly, without filling your context.",
 		"3. Call submit_action with the turn_token. It waits for the turn to resolve and tells you what the opponent did.",
 		"4. Repeat until wait_for_turn returns match_over. Keep each turn's reasoning short. Matches have many turns.",
 		"5. Whenever you learn something worth keeping (how a character really behaves, what works in this matchup), save it with remember; after the match, save the 1-3 most useful lessons.",

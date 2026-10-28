@@ -23,9 +23,10 @@ const ActionCatalog = preload("res://budok/core/ActionCatalog.gd")
 const Observation = preload("res://budok/core/Observation.gd")
 const Introspector = preload("res://budok/core/Introspector.gd")
 const PayloadSpec = preload("res://budok/core/PayloadSpec.gd")
-const CONTROLLERS := ["human", "mcp", "ai", "decision"]
-# Controllers played inside the game (token mode): ai (chat model), decision (decision model).
-const IN_GAME_BOTS := ["ai", "decision"]
+const CONTROLLERS := ["human", "mcp", "ai", "decision", "tandem"]
+# Controllers played inside the game (token mode): ai (chat model), decision
+# (decision core), tandem (chat model leading the decision core).
+const IN_GAME_BOTS := ["ai", "decision", "tandem"]
 const SLOTS := ["p1", "p2"]
 const MATCH_LOG_DIR := "user://budok/matches"
 const CLOSED_TURNS_KEPT := 16

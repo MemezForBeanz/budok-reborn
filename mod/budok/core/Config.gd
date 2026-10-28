@@ -24,6 +24,30 @@ func load_config() -> void:
 	if str(get_value("mcp.auth_token", "")) == "":
 		set_value("mcp.auth_token", Util.random_hex(16))
 		save()
+	if _migrate_decision_settings():
+		save()
+
+
+# budok 1.3.0 kept the one decision model and the lookahead under ai.decide;
+# both moved to the decision core (ai.core), which can hold several models.
+func _migrate_decision_settings() -> bool:
+	var old = Util.dig(_user, "ai.decide", {})
+	if not (old is Dictionary) or Util.dig(_user, "ai.core") != null:
+		return false
+	var moved = false
+	for key in ["depth", "candidates", "replies", "max_options", "think_s", "request_timeout_s", "frame_budget_ms"]:
+		if old.has(key):
+			set_value("ai.core." + key, old[key])
+			moved = true
+	if old.has("provider") or old.has("model"):
+		set_value("ai.core.endpoints", [{"label": "", "provider": str(old.get("provider", "vercel")), "model": str(old.get("model", "")),
+			"api_key": "", "threads": int(old.get("threads", 4)), "max_rpm": int(old.get("max_rpm", 0)), "enabled": true}])
+		moved = true
+	for key in ["provider", "model", "depth", "threads", "candidates", "replies", "max_options", "think_s", "request_timeout_s",
+			"frame_budget_ms", "max_rpm", "extra_body"]:
+		old.erase(key)
+		data["ai"]["decide"].erase(key)
+	return moved
 
 
 func get_value(path: String, default_value = null):
@@ -57,6 +81,11 @@ func redacted() -> Dictionary:
 
 
 func _redact(value):
+	if value is Array:
+		var items = []
+		for item in value:
+			items.append(_redact(item))
+		return items
 	if value is Dictionary:
 		var out = {}
 		for key in value:

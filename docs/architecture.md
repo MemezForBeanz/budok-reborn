@@ -28,10 +28,12 @@ YOMI Hustle process
    ├─ mcp/McpServer         JSON-RPC, sessions, auth, origin checks; mcp/Tools + mcp/Resources
    ├─ ai/LlmClient          Anthropic Messages API / OpenAI-compatible chat, and decision models
    │                        (Vercel AI Gateway /decision-model, TypeSafe /v1/systemone) via HTTPRequest
-   ├─ ai/AutoPilot          token mode player (controller "ai")
-   ├─ ai/DecisionPilot      decision-model player (controller "decision"): ranks, simulates, picks
+   ├─ ai/AutoPilot          token mode player (controllers "ai" and "tandem"; tandem adds look_ahead)
+   ├─ ai/DecisionCore       decision models behind one dispatcher (ai.core.endpoints: keys, parallel
+   │                        requests, rate limits, failover) and the lookahead analysis; look_ahead
+   ├─ ai/DecisionPilot      decision-model player (controller "decision"): analyze, then pick
    ├─ ai/Annotator          token mode schema writer
-   ├─ ui/SettingsView       all settings as tabs (one field table)
+   ├─ ui/SettingsView       all settings as four tabs (Play, Models, Chatbots, Characters)
    ├─ ui/ModMenuHook        adds those tabs to the game's Mod List → budok entry
    ├─ ui/Panel              same tabs on the F8 overlay
    └─ automation/Automation optional user GDScript
@@ -46,7 +48,7 @@ YOMI Hustle process
    - `human` does nothing.
    - `mcp` answers `wait_for_turn` / `submit_action`.
    - `ai` triggers the autopilot.
-   - `decision` triggers the decision player.
+   - `decision` triggers the decision player; `tandem` triggers the autopilot with the decision core.
 3. `submit` re-validates against the snapshot: the action must be legal and `is_usable()` (an unusable
    action would turn into a forfeit), and the payload and extras must be valid. It then calls
    `on_action_submitted` with exactly the values the UI would produce.

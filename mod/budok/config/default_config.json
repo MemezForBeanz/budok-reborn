@@ -15,7 +15,7 @@
   },
   "turns": {
     "forced_turns": "skip_unless_hurt",
-    "timeout_s": {"mcp": 0, "ai": 120, "decision": 120},
+    "timeout_s": {"mcp": 0, "ai": 120, "decision": 120, "tandem": 180},
     "fallback_action": "Continue",
     "hide_bot_panel": true,
     "history_length": 12
@@ -47,19 +47,19 @@
       "extra_body": {}
     },
     "decide": {
-      "provider": "vercel",
-      "model": "typesafe-ai/jev",
+      "pick": "sample"
+    },
+    "core": {
+      "endpoints": [
+        {"label": "Jev", "provider": "typesafe", "model": "jev-latest", "api_key": "", "threads": 4, "max_rpm": 0, "enabled": true}
+      ],
       "depth": 10,
-      "threads": 4,
       "candidates": 4,
       "replies": 3,
       "max_options": 48,
-      "pick": "sample",
       "think_s": 30,
       "request_timeout_s": 20,
-      "frame_budget_ms": 8,
-      "max_rpm": 0,
-      "extra_body": {}
+      "frame_budget_ms": 8
     },
     "annotate": {
       "provider": "anthropic",

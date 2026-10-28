@@ -76,19 +76,38 @@ func _run() -> void:
 	for i in range(budok_tabs.get_tab_count()):
 		titles.append(budok_tabs.get_tab_title(i))
 	print("tabs: ", titles)
-	check(titles.size() == 7 and titles[0] == "Mod Info" and "AI" in titles and "Providers" in titles, "Mod Info kept and budok tabs added")
+	check(titles == ["Mod Info", "Play", "Models", "Chatbots", "Characters"], "Mod Info kept and budok's four tabs added")
 	var view = runtime.mod_menu.view
 	var model_field = view._fields["ai.annotate.model"]["control"]
 	model_field.text = "claude-sonnet-5-5"
-	view._fields["ai.providers.openai.api_key"]["control"].text = "sk-test"
+	# The key field follows the provider picked for the role.
+	var provider = view._fields["ai.annotate.provider"]["control"]
+	for i in range(provider.get_item_count()):
+		if provider.get_item_metadata(i) == "openai":
+			provider.select(i)
+	view._on_role_provider_changed(-1, "annotate")
+	view._role_keys["annotate"]["key"].text = "sk-test"
 	view._fields["controllers.p2"]["control"].select(2)
+	view._on_add_endpoint()
+	var card = view._endpoint_cards[view._endpoint_cards.size() - 1]
+	card["model"].text = "jev-preview"
+	card["key"].text = "ts-test"
 	view._on_save()
 	check(runtime.config.get_value("ai.annotate.model") == "claude-sonnet-5-5", "model change saved")
-	check(runtime.config.api_key("openai") == "sk-test", "API key saved")
+	check(runtime.config.api_key("openai") == "sk-test", "API key saved for the role's provider")
 	check(runtime.matches.controllers["p2"] == "ai", "controller applied immediately")
+	var endpoints = runtime.config.get_value("ai.core.endpoints")
+	check(endpoints.size() == 2 and endpoints[1]["model"] == "jev-preview" and endpoints[1]["api_key"] == "ts-test", "decision model added with its own key")
+	check(runtime.core.capacity() == 4, "only decision models with a key count")
 	var saved = load("res://budok/core/Util.gd").read_json("user://budok/config.json")
 	check(saved["ai"]["annotate"]["model"] == "claude-sonnet-5-5", "config file written")
-	check(view._fields["ai.providers.openai.api_key"]["control"].text == "", "key field cleared after save")
+	check(view._role_keys["annotate"]["key"].text == "", "key field cleared after save")
+	check(view._endpoint_cards[1]["key"].text == "" and view._endpoint_cards[1]["key"].placeholder_text.begins_with("saved"), "decision key kept hidden after save")
+	view._on_save()
+	check(runtime.config.get_value("ai.core.endpoints")[1]["api_key"] == "ts-test", "saving again keeps the hidden key")
+	view._on_remove_endpoint(view._endpoint_cards[0]["box"])
+	view._on_save()
+	check(runtime.config.get_value("ai.core.endpoints").size() == 1 and runtime.config.get_value("ai.core.endpoints")[0]["model"] == "jev-preview", "decision model removed")
 	runtime.panel.toggle()
 	check(runtime.panel._root.visible, "overlay opens")
 	runtime.panel.toggle()
