@@ -12,9 +12,11 @@ YOMI Hustle process
    │    ├─ ActionCatalog     legal moves + payload/extras from the player's native ActionButtons panel;
    │    │                    applies via ActionButtons.on_action_submitted (the Lock In path)
    │    ├─ Observation       per-player snapshot + plain-language situation
-   │    ├─ Simulator         what-if previews: fresh Game (ghost) + copy_to + tick, in a hidden viewport
-   │    └─ Lookahead         lines played several turns ahead in previews (SimTurns: the panel's
-   │                         legality rules and the game's turn logic, ported for previews)
+   │    ├─ Simulator         what-if previews: fresh Game (ghost) + copy_to + tick, in a hidden viewport;
+   │    │                    a pool of previews reset between runs at one decision point
+   │    └─ Lookahead         the sweep (every pair of moves for the next exchange) and lines played
+   │                         several turns ahead in previews (SimTurns: the panel's legality rules,
+   │                         the game's turn logic and each move's input variants, ported for previews)
    ├─ core/Roster           Global.name_paths + character loader registry (lazy loading of mods)
    ├─ core/Introspector     measured skeleton from the character scene (states, hitboxes, resources)
    ├─ core/SchemaStore      notes lookup (override → mod-shipped → bundled → generated → registry),

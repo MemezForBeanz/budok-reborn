@@ -32,10 +32,12 @@ escapes) and move fast on obvious turns.
 3. **Check the risky ones** when it matters:
    - `simulate`: one of your moves against one assumed reply, on the real engine. Exact for the next
      exchange: damage, whether it reaches, who acts first after.
-   - `look_ahead` (when budok's decision core is set up): compares several of your moves against the
-     opponent's likeliest replies and plays each several turns deep, with fast decision models choosing
-     both fighters' moves. You get a few lines per move. Use it in neutral and at turning points; skip it
-     for obvious turns (one sensible move, a combo you already confirmed, forced holds).
+   - `look_ahead`: plays each of your candidate moves (plus your blocks and dodges) against every reply
+     the opponent has, each move and its aim, strength and direction variants, up to the next decision
+     point. With budok's decision core set up it also picks your candidates if you don't name them and
+     plays the best ones several turns deeper, with fast decision models choosing both fighters' moves.
+     Use it in neutral and at turning points; skip it for obvious turns (one sensible move, a combo you
+     already confirmed, forced holds).
 4. **Mix up.** The opponent reads patterns too. Don't repeat a move they just punished. Use their habits
    from `history`: if they block a lot, grab; if they attack on every turn, block or use a faster move;
    if they jump, anti-air.
@@ -43,15 +45,26 @@ escapes) and move fast on obvious turns.
 
 ## Reading look_ahead
 
-- `next_turn`: what happens in this exchange against each tested reply, with how likely that reply is.
-  "deal 90, take 0, you act first" against a likely reply is a strong sign.
-- `lines`: imagined continuations several turns deep. Both sides are played by the decision models, so
-  they show what tends to follow (a combo, a punish, a reset), not what will surely happen.
-- `score`: damage dealt minus taken (a KO counts 1000), weighted by how likely each reply is, plus the
-  deep lines. Compare scores between moves; the absolute number matters less.
-- `decision_model_pick`: the decision models' choice after seeing all of the above.
-- Prefer moves that do well against the likely replies and are not disastrous against any of them.
-  It is advice: you know the match history and the opponent's habits, so you decide.
-- Steer it: name your candidates in `moves`, the replies you fear in `opponent_moves`, set `depth`
-  (more turns, slower), and describe your plan in `focus` and the opponent's habits in
-  `opponent_style` so the imagined lines play like this match.
+- `coverage`: how many exchanges were played. "536 of 536" means every reply was tried against every
+  move; fewer means time ran out before the least likely replies.
+- Per move: `action`, `data`, `extra` are what to submit. `average` is damage dealt minus taken (a KO
+  counts 1000), weighted by how likely each reply is. `worst` is the reply that hurts the move most,
+  with `reply_action` to name it back in `opponent_moves`. `likely` and `dangerous` list the
+  likeliest replies and the costliest ones.
+- A good average can hide one lethal counter: prefer moves whose worst case you can live with, unless
+  that reply is very unlikely and the reward is big. "take 0, you act first" against every likely
+  reply is a strong sign.
+- `lines`: imagined continuations several turns deep against the likeliest and the worst reply. Both
+  sides are played by the decision models, so they show what tends to follow (a combo, a punish, a
+  reset), not what will surely happen. Each step is an action you could submit; `stopped` says why a
+  line is shorter than `depth` (a KO, out of time, the model gave no move, a long move).
+- `score`: the average plus the deep lines. Compare scores between moves; the absolute number matters
+  less. `decision_model_pick`: the decision models' choice after seeing all of the above.
+- `start` is where every run began, and `preview` says whether the engine's copy matched the live
+  match. `engine_data` and `note` show what a move's data became after its limits (a clamped aim).
+  If the real turn plays out differently, compare with these to tell a wrong guess from a wrong input.
+- It is advice: you know the match history and the opponent's habits, so you decide.
+- Steer it: name your candidates in `moves`, the replies you fear in `opponent_moves` (with data, to
+  test an exact aim), set `depth` (more turns, slower), and describe your plan in `focus` and the
+  opponent's habits in `opponent_style` so the imagined lines play like this match. A second call in
+  the same turn reuses the exchanges already played, so it is quick.

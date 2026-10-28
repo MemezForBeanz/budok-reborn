@@ -83,9 +83,12 @@ static func describe_control(control) -> Dictionary:
 	var sample = control.get_data()
 	if control.has_method("get_value_float") and Util.has_prop(control, "panel_radius"):
 		var spec = {"kind": "xy", "range": XY_RANGE, "default": Util.json_safe(sample)}
-		for hint in ["limit_angle", "limit_center_degrees", "limit_range_degrees"]:
+		for hint in ["limit_angle", "limit_center_degrees", "limit_range_degrees", "always_max", "bottom_half", "left_quarter"]:
 			if Util.has_prop(control, hint):
 				spec[hint] = Util.json_safe(control.get(hint))
+		# The pad's shape (XYPlot.PanelType: full, half or quarter circle)
+		# limits where the mouse can aim; set_value_float does not.
+		spec["panel"] = ["full", "half", "quarter"][int(clamp(Util.as_int(Util.prop(control, "panel_type", 0)), 0, 2))]
 		return spec
 	if Util.has_prop(control, "NE") and Util.has_prop(control, "SW") and control.has_method("get_value"):
 		var allowed = []
@@ -287,7 +290,11 @@ static func coerce(spec: Dictionary, value, control = null) -> Dictionary:
 				if abs(Util.as_int(applied.get("x", x)) - x) > 2 or abs(Util.as_int(applied.get("y", y)) - y) > 2:
 					result["note"] = "aim {x: %d, y: %d} became {x: %s, y: %s} (%s)" % [x, y, applied.get("x"), applied.get("y"), _aim_limits(control)]
 				return result
-			return {"ok": true, "value": {"x": x, "y": y}}
+			var aimed = clamp_aim(spec, x, y)
+			var aim_result = {"ok": true, "value": aimed}
+			if abs(aimed["x"] - x) > 2 or abs(aimed["y"] - y) > 2:
+				aim_result["note"] = "aim {x: %d, y: %d} became {x: %d, y: %d} (the move's aim limits)" % [x, y, aimed["x"], aimed["y"]]
+			return aim_result
 		"direction8":
 			var dir_name = _direction_name(value)
 			# The live picker knows the current allowed set (it mirrors with reverse).
@@ -375,6 +382,26 @@ static func coerce(spec: Dictionary, value, control = null) -> Dictionary:
 				return _err("expected a value shaped like %s" % Util.json_str(default_value))
 			return {"ok": true, "value": _ints(value)}
 	return _err("unsupported payload kind %s" % kind)
+
+
+# What the aim pad (XYPlot.update_value, as set_value_float runs it) makes of
+# an aim when there is no live pad to set: within its angle limit (centered
+# on the forward side, spec["forward"] from SimTurns.facing_spec) and at full
+# length for moves that always use it.
+static func clamp_aim(spec: Dictionary, x: int, y: int) -> Dictionary:
+	var point = Vector2(x, y)
+	var forward = Util.as_int(spec.get("forward", 1), 1)
+	var center_degrees = deg2rad(float(spec.get("limit_center_degrees", 0)))
+	var center = Vector2(cos(center_degrees) * forward, sin(center_degrees))
+	var limited = bool(spec.get("limit_angle", false))
+	if limited and point != Vector2.ZERO:
+		var diff = center.angle_to(point)
+		var half = deg2rad(float(spec.get("limit_range_degrees", 360))) / 2.0
+		if abs(diff) > half:
+			point = center.rotated(half * sign(diff)) * point.length()
+	if bool(spec.get("always_max", false)):
+		point = (point if point != Vector2.ZERO else (center if limited else Vector2.UP)).normalized() * XY_RANGE
+	return {"x": int(round(point.x)), "y": int(round(point.y))}
 
 
 static func _choice_index(spec: Dictionary, value) -> int:

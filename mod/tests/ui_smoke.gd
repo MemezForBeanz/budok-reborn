@@ -17,6 +17,8 @@ var _mod = null
 
 
 func _init() -> void:
+	# Start from the defaults: this test saves settings to its own user folder.
+	Directory.new().remove("user://budok/config.json")
 	_mod = load("res://budok/ModMain.gd").new(null)
 	root.call_deferred("add_child", _mod)
 	call_deferred("_run")

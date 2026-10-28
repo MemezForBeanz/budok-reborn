@@ -12,13 +12,16 @@ const KNOWLEDGE_DIR := "res://budok/knowledge"
 const QUICK_START := [
 	"Each turn, first decide what kind of turn it is from situation: being hit (DI away or burst), you act first (punish or keep the combo going), neutral (a guess: pick by spacing), they act first (block or get out).",
 	"Then shortlist 2-4 moves from your character's notes (use_when, beats, loses_to; startup and reach against spacing.distance_x), check the risky ones with simulate or look_ahead, mix up, and submit_action.",
-	"look_ahead (when budok's decision core is set up) plays several of your moves several turns deep with fast decision models and answers in a few lines per move: use it in neutral and at turning points, and decide yourself.",
+	("look_ahead plays your candidate moves (and your blocks and dodges) against every reply the opponent has, on the real engine, and gives "
+		+ "each move's average, worst case and an action ready to submit; with budok's decision core set up it also plays the best ones several "
+		+ "turns deep. Use it in neutral and at turning points, and decide yourself."),
 	"The full playbook: the play_match prompt, or the resource yomi://knowledge/playbook.",
 ]
-const TANDEM_PLAY := ("# Tandem: you lead a decision core\nlook_ahead hands the hard work to fast decision models: they play your candidate "
-	+ "moves ahead on the real engine (up to 30 turns, with both fighters' moves chosen by the models) and report back in a few lines. "
-	+ "Use it to compare plans you cannot work out yourself, steer it with focus and opponent_style, then decide and submit. "
-	+ "One or two look_ahead calls per turn are plenty; skip it when the choice is obvious.")
+const TANDEM_PLAY := ("# Tandem: you lead a decision core\nlook_ahead does the hard work for you: it plays your candidate moves (and your "
+	+ "blocks and dodges) against every reply the opponent has on the real engine, then has fast decision models play the best ones further "
+	+ "(up to 30 turns, both fighters' moves chosen by the models), and reports each move's average, worst case and the reply behind it. "
+	+ "Prefer moves whose worst case you can live with. Steer it with focus and opponent_style, then decide and submit the move's action, "
+	+ "data and extra as listed. One or two look_ahead calls per turn are plenty; skip it when the choice is obvious.")
 
 
 static func knowledge(topic: String) -> String:

@@ -75,14 +75,19 @@ Decision models such as TypeSafe's Jev don't chat: they pick one of a fixed list
 probability for each. The decision core puts one or more of them behind one dispatcher and uses them to
 look ahead on the real engine. For one turn:
 
-1. Unless the caller named them, one request ranks your moves and predicts the opponent's (two questions,
-   one request).
-2. Your `candidates` moves are played on the engine against `replies` opponent replies, up to the next
-   decision point.
-3. Deep lines (one per parallel request the core has) play on from there for `depth` turns in all. At
-   every decision point inside a line the models pick both fighters' moves, drawn from their
-   probabilities so lines differ.
-4. A last request ranks the candidates, each now described with what the engine showed.
+1. Unless the caller named them, one request ranks your moves and guesses the opponent's move (two
+   questions, one request). Your `candidates` best moves are compared, plus up to four of your defensive
+   moves (block, low block, dodges, burst) that aren't among them.
+2. The sweep: every candidate is played on the engine against **every** opponent reply, up to the next
+   decision point. Replies are each legal move and its variants: every aim its pad allows (and half
+   strength on pads with few aims), each direction, choice and switch, a slider's ends and middle. A
+   move's guessed probability is shared by its variants. Likeliest replies go first, so if time runs out
+   every candidate has met the same replies. This needs no model calls.
+3. Deep lines (one per parallel request the core has) start from the best candidates against their
+   likeliest and their worst reply and play on for `depth` turns in all. At every decision point inside
+   a line the models pick both fighters' moves, drawn from their probabilities so lines differ.
+4. A last request ranks the candidates, each now described with what the engine showed (average, worst
+   case, likeliest replies, lines).
 
 Who uses it:
 
@@ -115,17 +120,20 @@ Lookahead settings (also `ai.core`):
 | Key | Default | Meaning |
 |---|---|---|
 | `depth` | `10` | Turns each deep line plays, counting the move being chosen (up to 30). `1` only plays the next turn for each candidate and reply; `0` turns simulations off, so the first request decides. |
-| `candidates` / `replies` | `4` / `3` | Your moves compared, and opponent replies each one is tested against. Every pair gets at least a one-turn line. |
+| `candidates` | `4` | Your moves compared (plus your defensive moves). Each is played against every opponent reply. |
 | `max_options` | `48` | Options per question (the API allows 255). Each move's default input comes first, then other aims, directions or slider values. Lower it for models that reject long lists. |
 | `think_s` | `30` | Thinking time per turn, counted from the first answer (waiting for a free request doesn't count). Everything ends 5 s before the turn timeout. |
 | `request_timeout_s` | `20` | Per request. |
-| `frame_budget_ms` | `8` | Engine time all lines may use per frame. Higher thinks faster but makes the game less smooth. |
+| `frame_budget_ms` | `12` | Engine time the sweep and lines may use per frame. Higher thinks faster but makes the game less smooth. |
 
 `ai.decide.pick` (`sample` or `best`) only affects the decision controller.
 
 Cost and speed: one request per turn of each deep line, plus two. Depth 10 with 4 parallel requests is
-about 40 requests a turn. With Jev that took 7-9 s a turn in testing. Each line also needs its own copy of
-the match (about 80 ms of engine work), so a turn takes a few seconds even with an instant model.
+about 40 requests a turn. The sweep is engine work only: 8 moves against 60-70 replies is about 500
+exchanges, roughly 15 ms of engine work each, so 8-12 s at the default frame budget. It gets up to two
+thirds of `think_s` (the deep lines the rest). A preview is copied from the match once and then reset
+between exchanges, restoring only what an exchange changed (checked against fresh copies, exchange for
+exchange). A second `look_ahead` in the same turn reuses the exchanges already played.
 
 Which models:
 

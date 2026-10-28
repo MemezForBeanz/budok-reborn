@@ -80,7 +80,8 @@ func _define() -> void:
 	var look_ahead = DecisionCore.look_ahead_properties()
 	look_ahead["slot"] = slot
 	_add("look_ahead", "Look ahead (decision core)", DecisionCore.LOOK_AHEAD_HELP
-		+ " Needs a decision model in budok's settings (Models tab, Decision core). Takes a few seconds; the result is short.", look_ahead, [])
+		+ " Without a decision model in budok's settings (Models tab, Decision core) it still sweeps the moves you name, the next exchange only."
+		+ " Takes a few seconds to tens of seconds (ai.core.think_s caps it).", look_ahead, [])
 	_add("submit_action", "Submit action", "Lock in your move for the turn. Validated against the game; on error nothing is applied and you can retry with the same token. "
 		+ "Retrying a move that was already locked in returns ok with already_applied (and the outcome), so a lost reply is safe to retry.",
 		{"turn_token": {"type": "string"}, "action": {"type": "string"}, "data": data, "extra": extra,

@@ -35,7 +35,7 @@ func _migrate_decision_settings() -> bool:
 	if not (old is Dictionary) or Util.dig(_user, "ai.core") != null:
 		return false
 	var moved = false
-	for key in ["depth", "candidates", "replies", "max_options", "think_s", "request_timeout_s", "frame_budget_ms"]:
+	for key in ["depth", "candidates", "max_options", "think_s", "request_timeout_s", "frame_budget_ms"]:
 		if old.has(key):
 			set_value("ai.core." + key, old[key])
 			moved = true

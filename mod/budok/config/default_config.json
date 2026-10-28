@@ -55,11 +55,10 @@
       ],
       "depth": 10,
       "candidates": 4,
-      "replies": 3,
       "max_options": 48,
       "think_s": 30,
       "request_timeout_s": 20,
-      "frame_budget_ms": 8
+      "frame_budget_ms": 12
     },
     "annotate": {
       "provider": "anthropic",

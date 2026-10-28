@@ -309,26 +309,12 @@ func _test_decisions() -> void:
 		options.append({"label": label})
 	var ranked = DecisionCore._top(options, {"A": 0.1, "B": 0.5, "C": 0.3, "D": 0.1}, 2)
 	check(ranked.size() == 2 and ranked[0]["label"] == "B" and ranked[1]["label"] == "C", "candidates are the likeliest options")
-	var plan = DecisionCore.plan([{"label": "A"}, {"label": "B"}], [{"label": "x"}, {"label": "y"}], 10, 3)
-	var deep = 0
-	for line in plan:
-		deep += 1 if line["depth"] == 10 else 0
-	check(plan.size() == 4 and deep == 3 and plan[0]["candidate"] == 0 and plan[1]["candidate"] == 1 and plan[2]["reply"] == 1,
-		"deep lines spread over candidates, short lines cover the other pairs")
-	check(DecisionCore.plan([{"label": "A"}], [{"label": "x"}], 1, 4).size() == 1, "depth 1 only plays the next turn")
 	check(DecisionCore.depth_for_rate(10, 4, 0, 30000, 1) == 10, "no rate limit keeps the depth")
 	check(DecisionCore.depth_for_rate(10, 4, 5, 30000, 1) == 1, "5 requests a minute leave no calls for deep lines")
 	check(DecisionCore.depth_for_rate(10, 4, 60, 30000, 1) == 8 and DecisionCore.depth_for_rate(10, 4, 60, 30000, 2) == 4, "deep lines share what the limit allows")
 	check(DecisionCore.depth_for_rate(10, 4, 60, 30000, 1, 0) == 8 and DecisionCore.depth_for_rate(10, 4, 20, 30000, 1, 0) == 3,
 		"look-aheads without their own questions keep more for lines")
-	var line_results = [{"ok": true, "first": {"dealt": 100, "taken": 0, "ko": ""}, "turns": 1}]
-	var facts = DecisionCore.facts([{"label": "A", "description": "Slash (Attack)", "input": null}], [{"label": "x"}], {"x": 1.0},
-		[{"candidate": 0, "reply": 0, "depth": 1}], line_results)
-	check(facts[0]["text"].find("vs x (100% likely): you deal 100, take 0") != -1 and facts[0]["score"] == 100.0, "simulation facts describe each candidate")
-	var summary = DecisionCore.summarize({"candidates": facts, "replies": [{"option": {"label": "x"}, "p": 1.0}], "ranking": {"A": 1.0}, "depth": 1,
-		"lines_played": 1, "lines_planned": 1})
-	check(summary["decision_model_recommends"] == "A" and summary["moves"][0]["next_turn"][0].find("vs x (100%): deal 100, take 0") != -1,
-		"look_ahead answers in a few short lines")
+	_test_sweep_analysis()
 	check(DecisionCore._problem({"enabled": true, "provider": "typesafe", "key": "", "model": "jev-latest"}) == "no API key"
 		and DecisionCore._problem({"enabled": true, "provider": "vercel", "key": "k", "model": ""}) == "no model"
 		and DecisionCore._problem({"enabled": true, "provider": "typesafe", "key": "k", "model": ""}) == ""
@@ -348,6 +334,50 @@ func _test_decisions() -> void:
 		"1.3.0 decision settings move to the decision core")
 
 
+func _test_sweep_analysis() -> void:
+	var jumps = [{"label": "Jump", "action": "Jump"}, {"label": "Jump up-fwd", "action": "Jump"}, {"label": "Grab", "action": "Grab"}]
+	var guessed = DecisionCore.reply_weights(jumps, {"Jump": 0.5, "Grab": 0.5}, false)
+	check(abs(guessed[0] - 0.25) < 0.001 and abs(guessed[1] - 0.25) < 0.001 and abs(guessed[2] - 0.5) < 0.001, "a move's guess is shared by its variants")
+	var even = DecisionCore.reply_weights(jumps, {}, false)
+	check(abs(even[2] - 0.5) < 0.001, "with no guess every move counts the same, not every variant")
+	check(abs(DecisionCore.reply_weights(jumps, {}, true)[2] - 1.0 / 3.0) < 0.001, "named replies count the same")
+	check(Util.json_str(DecisionCore.sweep_order(2, [0.2, 0.5, 0.3])) == Util.json_str([[0, 1], [1, 1], [0, 2], [1, 2], [0, 0], [1, 0]]),
+		"the sweep plays the likeliest replies first, against every candidate")
+	var played = {"move": "A", "action": {"action": "A"}, "engine_data": null}
+	var hit = {"dealt": 100, "taken": 0, "ko": "", "next_turn": "you act first", "stop": "decision", "step": {"you": played}}
+	var hurt = {"dealt": 0, "taken": 150, "ko": "", "next_turn": "they act first", "stop": "decision", "step": {"you": played}}
+	var replies = [{"label": "x", "action": "x", "input": null, "di": null}, {"label": "y high", "action": "y", "input": {"x": 0, "y": 1}, "di": null}]
+	var weights = DecisionCore.reply_weights(replies, {"x": 0.9, "y": 0.1}, false)
+	var candidate = {"label": "A", "action": "A", "input": null, "di": null, "description": "Slash (Attack)"}
+	var facts = DecisionCore.facts([candidate, candidate], replies, weights, [[hit, hurt], [null, hit]])
+	check(abs(facts[0]["average"] - 75.0) < 0.01 and facts[0]["worst"]["index"] == 1 and facts[0]["best"]["index"] == 0 and facts[0]["tested"] == 2,
+		"each move gets its weighted average, worst and best reply")
+	check(facts[1]["tested"] == 1 and facts[1]["worst"]["index"] == 1, "replies the sweep did not reach are left out")
+	var entries = [{"score": 10.0, "worst": {"index": 1}, "option": candidate}, {"score": 50.0, "worst": {"index": 0}, "option": candidate}]
+	var lines = DecisionCore.deep_plan(entries, replies, [0.2, 0.8], 3, 10)
+	check(lines.size() == 3 and lines[0]["candidate"] == 1 and lines[0]["reply"] == 1 and lines[1]["reply"] == 0 and lines[2]["candidate"] == 0
+		and lines[2]["depth"] == 10, "deep lines go to the best moves, against their likeliest and their worst reply")
+	facts[0]["lines"] = [{"reply": 0, "turns": 2, "dealt": 50, "taken": 0, "ko": "", "stop": "model", "stop_detail": "rate limited", "steps": [
+		{"you": played, "opponent": {"move": "x", "action": {"action": "x"}, "engine_data": null}},
+		{"you": {"move": "Jump up-fwd", "action": {"action": "Jump", "data": {"x": 71, "y": -71}}, "engine_data": {"x": 71, "y": -71}}}]}]
+	var summary = DecisionCore.summarize({"candidates": [facts[0]], "replies": [{"option": replies[0], "p": 0.9}, {"option": replies[1], "p": 0.1}],
+		"replies_named": false, "ranking": {"A": 1.0}, "depth": 10, "lines_played": 1, "lines_planned": 1, "notes": [],
+		"start": {"tick": 5, "you": {"hp": 1000}, "opponent": {"hp": 1000}}, "sweep": {"pairs": 2, "played": 2, "check": {}}})
+	var move = summary["moves"][0]
+	check(summary["decision_model_recommends"] == "A" and move["action"] == "A" and not move.has("data") and move["average"] == 75
+		and move["worst"]["reply"] == "y high" and move["worst"]["reply_action"]["data"]["y"] == 1 and move["worst"]["result"].find("take 150") != -1,
+		"look_ahead shows the worst case with the reply to submit as opponent_moves")
+	check(move["dangerous"][0].find("vs y high (10%)") != -1 and move["likely"][0].find("vs x (90%): deal 100, you act first") != -1,
+		"look_ahead lists the likeliest and the most dangerous replies")
+	var line = move["lines"][0]
+	check(line["stopped"].find("gave no move (rate limited)") != -1 and line["steps"][1]["you"]["data"]["x"] == 71 and not line["steps"][1]["you"].has("engine_data")
+		and str(line["steps"][1]["opponent"]).find("busy") != -1, "line steps are executable and a short line says why it stopped")
+	check(summary["coverage"].find("all 2 opponent replies (2 moves") != -1 and summary["start"]["preview"] == "matches the live match",
+		"look_ahead says what it covered and where it started")
+	check(DecisionCore.stop_text("stuck", "", 3, 10).find("tick limit") != -1 and DecisionCore.stop_text("depth", "", 10, 10) == "played all 10 turns",
+		"every way a line ends is explained")
+
+
 func _test_talk_and_playbook() -> void:
 	check(SpeechBubbles.clean("  Too\nslow!\t ") == "Too slow!", "speech is one clean line")
 	var long_line = ""
@@ -361,17 +391,42 @@ func _test_talk_and_playbook() -> void:
 
 func _test_sim_turns() -> void:
 	check(SimTurns.relative_direction("NE", 1) == "up-fwd" and SimTurns.relative_direction("NE", -1) == "up-back", "screen directions read relative to the opponent")
-	var aims = SimTurns.variants({"kind": "xy", "default": {"x": 50, "y": 0}}, -1, 1)
-	check(aims.size() == 5 and aims[0]["input"]["x"] == -100 and aims[2]["input"]["y"] == -100, "free aims point toward the opponent")
-	var limited = SimTurns.variants({"kind": "xy", "limit_angle": true, "default": {"x": 70, "y": -20}}, -1, 1)
-	check(limited.size() == 1 and limited[0]["input"]["x"] == -70, "a limited aim keeps its default, mirrored when facing the other way")
+	var aims = SimTurns.variants({"kind": "xy", "panel": "full", "default": {"x": 50, "y": 0}}, -1, 1)
+	check(aims.size() == 9 and aims[0]["label"] == "" and aims[0]["input"]["x"] == -50 and aims[1]["label"] == "fwd" and aims[1]["input"]["x"] == -100
+		and aims[3]["input"]["y"] == -100, "free aims: the default, then all eight compass aims toward the opponent")
+	var jump = {"kind": "xy", "panel": "half", "limit_angle": true, "limit_center_degrees": -90, "limit_range_degrees": 120, "default": {"x": 0, "y": -50}}
+	var arcs = []
+	for aim in SimTurns.variants(jump, 1, 1):
+		arcs.append(aim["label"])
+	check(Util.json_str(arcs) == Util.json_str(["", "up-fwd", "up", "up-back", "up-fwd half", "up-back half"]),
+		"a limited pad tries the aims inside its arc at full and half strength (up half is the default)")
+	var limited = SimTurns.variants({"kind": "xy", "limit_angle": true, "limit_center_degrees": 0, "limit_range_degrees": 90, "default": {"x": 70, "y": -20}}, -1, 1)
+	var backward = false
+	for aim in limited:
+		backward = backward or aim["input"]["x"] > 0
+	check(limited[0]["input"]["x"] == -70 and not backward, "a limited aim is mirrored and stays on the forward side")
+	var quarter = SimTurns.variants({"kind": "xy", "panel": "quarter", "always_max": true, "default": {"x": 100, "y": 0}}, 1, 1)
+	check(quarter.size() == 3 and not SimTurns.aim_allowed({"panel": "quarter"}, 180) and not SimTurns.aim_allowed({"panel": "half"}, 90),
+		"quarter and half pads only aim where the mouse can (full length only when the move always uses it)")
 	var eight = {"kind": "direction8", "allowed": ["E", "NE", "Neutral"], "default": {"x": 1, "y": 0}}
 	var mirrored = SimTurns.variants(eight, -1, 1)
 	check(mirrored.size() == 2 and mirrored[0]["input"] == "W" and mirrored[0]["label"] == "fwd", "direction pickers mirror with facing")
 	check(PayloadSpec.coerce(SimTurns.facing_spec(eight, -1, 1), "W")["ok"], "mirrored directions are accepted")
 	var numbers = SimTurns.variants({"kind": "int_field", "key": "v", "min": 0, "max": 10, "default": {"v": 0}}, 1, 1)
-	check(numbers.size() == 3 and numbers[1]["input"] == 5, "sliders try min, middle and max")
+	check(numbers.size() == 3 and numbers[0]["input"] == null and numbers[1]["input"] == 5 and numbers[2]["input"] == 10, "sliders try their default, middle and max")
+	var sticky = SimTurns.variants({"kind": "bool", "default": true, "path": "Jump"}, 1, 1)
+	check(sticky.size() == 2 and sticky[1]["label"] == "Jump off" and sticky[1]["input"] == false, "switches try both ways")
+	var parry = {"kind": "object", "fields": {
+		"Block Height": {"kind": "choice", "choices": ["High", "Low"], "values": [{"x": 0, "y": 0}, {"x": 0, "y": 1}], "default_choice": "High"},
+		"Melee Parry Timing": {"kind": "int_field", "key": "count", "min": 1, "max": 20, "default": {"count": 1}}}}
+	var blocks = SimTurns.variants(parry, 1, 1)
+	check(blocks.size() == 4 and blocks[1]["label"] == "Low" and blocks[1]["input"]["Block Height"] == "Low" and blocks[2]["label"] == "Melee Parry Timing 10",
+		"moves with several inputs vary one at a time (a low block)")
+	check(PayloadSpec.coerce(parry, blocks[1]["input"])["value"]["Block Height"]["y"] == 1, "a field variant is valid data")
 	check(SimTurns.variants({"kind": "none"}, 1, 1)[0]["input"] == null, "moves without input have one option")
+	var clamped = PayloadSpec.coerce(SimTurns.facing_spec({"kind": "xy", "limit_angle": true, "limit_center_degrees": 0, "limit_range_degrees": 90}, -1, 1), {"x": 100, "y": 0})
+	check(clamped["value"]["x"] < 0 and clamped.has("note"), "an aim outside the limit is clamped like the pad does, and said so")
+	check(PayloadSpec.clamp_aim({"always_max": true}, 30, 0)["x"] == 100, "always-full aims are stretched")
 
 
 func _test_http_parsing() -> void:

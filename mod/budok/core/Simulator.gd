@@ -13,9 +13,19 @@ const GAME_SCENE := "res://Game.tscn"
 const MAX_EVENTS := 40
 const DETECT_TYPE := 6
 const NEUTRAL_EXTRA := {"DI": {"x": 0, "y": 0}, "reverse": false, "feint": false, "prediction": -1}
+# Restored by hand on reuse: the objects are copied again and objs_map is the
+# dictionary every object shares (its size seeds each new object's RNG).
+const KEEP_GAME_VARS := ["objects", "effects", "objs_map"]
+const MAX_POOL := 16
 
 var _busy := false
 var _sandbox: Viewport = null
+# Previews ready for reuse while the live match waits on one decision point
+# (it does not change until the turn resolves), and per preview what a reset
+# puts back.
+var _pool := []
+var _pool_key := ""
+var _bases := {}
 
 
 # actions: {"p1": {"action", "data", "extra"} or null, "p2": ...}
@@ -58,8 +68,9 @@ func run(game, actions: Dictionary, choosing: Array, max_ticks: int, viewer_slot
 
 # Coroutine: a hidden preview game holding a copy of the live match, ready to
 # tick. Returns {"ok", "game"} or {"ok": false, "error"}; free it with discard().
-# Several can exist at once (the decision player runs one per line).
-func spawn(game) -> Dictionary:
+# Several can exist at once (lookahead runs one per line). reusable: remember
+# what reset() needs, so take() can hand it out again after give_back().
+func spawn(game, reusable: bool = false) -> Dictionary:
 	yield(get_tree(), "idle_frame")
 	if not Util.valid(game) or not bool(Util.prop(game, "game_started", false)):
 		return {"ok": false, "error": "no match in progress"}
@@ -82,19 +93,198 @@ func spawn(game) -> Dictionary:
 	if not Util.valid(game) or not Util.valid(sim):
 		discard(sim)
 		return {"ok": false, "error": "match ended during simulation setup"}
+	var base = _before_copy(sim) if reusable else {}
 	game.copy_to(sim)
-	var objs_map = Util.prop(sim, "objs_map", {})
-	for key in objs_map:
-		if Util.valid(objs_map[key]):
-			objs_map[key].is_ghost = true
-	for id in [1, 2]:
-		sim.get_player(id).is_ghost = true
+	_settle(sim, game)
+	if reusable:
+		_after_copy(sim, base)
 	return {"ok": true, "game": sim}
 
 
 func discard(sim) -> void:
 	if Util.valid(sim):
+		_bases.erase(sim.get_instance_id())
 		sim.queue_free()
+
+
+# --- reusable previews ---
+#
+# A full copy (spawn) costs about five frames of work, most of it copying all
+# ~120 states of each fighter. A preview that played a line is put back by
+# restoring only what a line changes: the game's and the fighters' variables
+# as they were right after the first copy, the objects, and the states the
+# line entered (copied from the live match again). Checked against fresh
+# copies over many lines: same results tick for tick.
+
+# Coroutine: a preview of the live match at its current decision point, used
+# before when one is free. Returns {"ok", "game"} or {"ok": false, "error"};
+# hand it back with give_back().
+func take(game) -> Dictionary:
+	yield(get_tree(), "idle_frame")
+	if not Util.valid(game):
+		return {"ok": false, "error": "no match in progress"}
+	var key = "%d:%d" % [game.get_instance_id(), Util.as_int(Util.prop(game, "current_tick", 0))]
+	if key != _pool_key:
+		release_pool()
+		_pool_key = key
+	while not _pool.empty():
+		var sim = _pool.pop_back()
+		if reset(sim, game):
+			return {"ok": true, "game": sim}
+		discard(sim)
+	var spawned = yield(spawn(game, true), "completed")
+	if spawned["ok"]:
+		_bases[spawned["game"].get_instance_id()]["key"] = key
+	return spawned
+
+
+# A preview from take(), for the next take() at the same decision point.
+func give_back(sim) -> void:
+	if not Util.valid(sim):
+		return
+	if _bases.get(sim.get_instance_id(), {}).get("key", "") == _pool_key and _pool.size() < MAX_POOL and not (sim in _pool):
+		_pool.append(sim)
+	else:
+		discard(sim)
+
+
+func release_pool() -> void:
+	for sim in _pool:
+		discard(sim)
+	_pool.clear()
+	_pool_key = ""
+
+
+func _before_copy(sim) -> Dictionary:
+	var base = {"objs_map": Util.prop(sim, "objs_map", {}).duplicate(), "stacks": {}, "states": {}}
+	for id in [1, 2]:
+		var machine = sim.get_player(id).state_machine
+		var names = []
+		for state in machine.states_stack:
+			names.append(str(state.name))
+		base["stacks"][id] = names
+		base["states"][id] = str(machine.state.name)
+	return base
+
+
+func _after_copy(sim, base: Dictionary) -> void:
+	base["game"] = _variables(sim)
+	base["fighters"] = {}
+	base["touched"] = {}
+	for id in [1, 2]:
+		var fighter = sim.get_player(id)
+		base["fighters"][id] = _variables(fighter)
+		var touched = {str(fighter.state_machine.state.name): true}
+		base["touched"][id] = touched
+		fighter.state_machine.connect("state_changed", self, "_on_state_changed", [touched])
+	_bases[sim.get_instance_id()] = base
+
+
+# Every state a preview fighter enters, by name (the stack holds the states
+# passed through on the way, too).
+func _on_state_changed(stack, touched: Dictionary) -> void:
+	for state in stack:
+		if Util.valid(state):
+			touched[str(state.name)] = true
+
+
+# Puts a preview from take() back to a copy of the live match, right away (no
+# frame passes). False when that cannot be done or did not work out: the
+# caller then discards it and takes another.
+func reset(sim, game) -> bool:
+	if not Util.valid(sim) or not Util.valid(game):
+		return false
+	var base = _bases.get(sim.get_instance_id())
+	if base == null or base.get("key", "") != _pool_key:
+		return false
+	# Game.copy_to frees the target's objects while they leave its list, and
+	# its effects list keeps particles that are already gone: clear both first.
+	for fx in sim.effects:
+		if Util.valid(fx):
+			fx.free()
+	sim.effects.clear()
+	for obj in sim.objects.duplicate():
+		if Util.valid(obj):
+			obj.free()
+	sim.objects.clear()
+	_restore(sim, base["game"], KEEP_GAME_VARS)
+	sim.objs_map.clear()
+	for key in base["objs_map"]:
+		sim.objs_map[key] = base["objs_map"][key]
+	var full_maps = {}
+	for id in [1, 2]:
+		var fighter = sim.get_player(id)
+		var live = game.get_player(id)
+		_restore(fighter, base["fighters"][id], ["objs_map"])
+		for hitbox in fighter.hitboxes:
+			if hitbox.active:
+				hitbox.deactivate()
+		var machine = fighter.state_machine
+		machine.queued_states = []
+		machine.queued_data = []
+		var stack = []
+		for name in base["stacks"][id]:
+			stack.append(machine.states_map[name])
+		machine.states_stack = stack
+		machine.state = machine.states_map[base["states"][id]]
+		# copy_to copies every state in the target's map: hand it just the ones
+		# that can differ from the live match, then put the full map back.
+		var keep = base["touched"][id]
+		keep[base["states"][id]] = true
+		keep[str(live.state_machine.state.name)] = true
+		for state in live.state_machine.states_stack:
+			keep[str(state.name)] = true
+		var some = {}
+		for name in keep:
+			if machine.states_map.has(name):
+				some[name] = machine.states_map[name]
+		full_maps[id] = machine.states_map
+		machine.states_map = some
+	game.copy_to(sim)
+	var same = true
+	for id in [1, 2]:
+		var machine = sim.get_player(id).state_machine
+		machine.states_map = full_maps[id]
+		same = same and str(machine.state.name) == str(game.get_player(id).state_machine.state.name)
+		base["touched"][id].clear()
+		base["touched"][id][str(machine.state.name)] = true
+	_settle(sim, game)
+	return same
+
+
+# Script variables, with their own copies of arrays and dictionaries.
+static func _variables(obj) -> Dictionary:
+	var out = {}
+	for property in obj.get_property_list():
+		if property["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE:
+			var value = obj.get(property["name"])
+			out[property["name"]] = value.duplicate(true) if value is Array or value is Dictionary else value
+	return out
+
+
+static func _restore(obj, values: Dictionary, skip: Array) -> void:
+	for name in values:
+		if not (name in skip):
+			var value = values[name]
+			obj.set(name, value.duplicate(true) if value is Array or value is Dictionary else value)
+
+
+# After a copy from the live match: everything in the preview is a ghost, and
+# the fighters' own variables are put back as the live match has them.
+# copy_to re-enters each fighter's current state, and entering some states
+# spends an air option or meter that the live match already spent.
+static func _settle(sim, game) -> void:
+	var objs_map = Util.prop(sim, "objs_map", {})
+	for key in objs_map:
+		if Util.valid(objs_map[key]):
+			objs_map[key].is_ghost = true
+	for id in [1, 2]:
+		var fighter = sim.get_player(id)
+		fighter.is_ghost = true
+		var live = game.get_player(id)
+		for name in Util.prop(live, "state_variables", []):
+			var value = live.get(name)
+			fighter.set(name, value.duplicate(true) if value is Array or value is Dictionary else value)
 
 
 func _step(sim, max_ticks: int, viewer: String, followups: Array) -> Dictionary:

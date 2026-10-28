@@ -12,9 +12,13 @@ const PayloadSpec = preload("res://budok/core/PayloadSpec.gd")
 const ACTION_TYPES := ["Movement", "Attack", "Special", "Super", "Defense", "Hurt"]
 const BUSY_HURT := 1  # CharacterState.BusyInterrupt.Hurt
 const MIRRORED := {"E": "W", "W": "E", "NE": "NW", "NW": "NE", "SE": "SW", "SW": "SE"}
-# Aims tried for moves with a free aim pad: degrees above the forward line.
-const AIM_ANGLES := [["fwd", 0], ["up-fwd", 45], ["up", 90], ["down-fwd", -45], ["back", 180]]
+# Aims tried on aim pads, in screen degrees with forward = 0 and up = -90.
+const COMPASS := [["fwd", 0], ["up-fwd", -45], ["up", -90], ["up-back", -135], ["back", 180], ["down-back", 135], ["down", 90], ["down-fwd", 45]]
+const HALF_STRENGTH := 0.5
+# Pads with this many aims or fewer also get half-strength aims.
+const FEW_AIMS := 5
 const MAX_CHOICES := 3
+const MAX_FIELD_VARIANTS := 8
 
 
 # Names of the moves `fighter` may pick at this decision point, Continue first.
@@ -123,62 +127,134 @@ static func is_hurt(fighter) -> bool:
 
 
 # Inputs worth comparing for one move: [{"label", "input"}], where input is
-# what submit_action takes as data (null = the move's default) and label is ""
-# for the default. forward is the side the opponent is on (+1 = right);
-# spec_facing is the facing the spec's defaults were read with.
+# what submit_action takes as data (null = the move's default). The first
+# entry is the move as it stands (label "", its default) unless the move has
+# no usable default (direction pickers); the rest vary one thing each: every
+# compass aim the pad allows (and half strength on pads with few aims), each
+# direction, choice and on/off switch, and an int's ends and middle. forward
+# is the side the opponent is on (+1 = right); spec_facing is the facing the
+# spec's defaults were read with.
 static func variants(spec: Dictionary, forward: int, spec_facing: int) -> Array:
 	var flipped = forward != spec_facing
+	var out = []
 	match spec.get("kind", "none"):
 		"xy":
-			if bool(spec.get("limit_angle", false)) or not (spec.get("default") is Dictionary):
-				return [{"label": "", "input": _mirror_xy(spec.get("default"), flipped)}]
-			var aims = []
-			for aim in AIM_ANGLES:
-				var radians = deg2rad(aim[1])
-				aims.append({"label": aim[0], "input": {"x": int(round(cos(radians) * PayloadSpec.XY_RANGE)) * forward,
-					"y": -int(round(sin(radians) * PayloadSpec.XY_RANGE))}})
-			return aims
+			out = _aims(spec, forward, flipped)
 		"direction8":
-			var directions = []
 			for name in spec.get("allowed", []):
 				if name != "Neutral" or spec["allowed"].size() == 1:
 					var screen = MIRRORED.get(name, name) if flipped else name
-					directions.append({"label": relative_direction(screen, forward), "input": screen})
-			return directions if not directions.empty() else [{"label": "", "input": null}]
+					out.append({"label": relative_direction(screen, forward), "input": screen})
 		"int_field":
-			var values = []
+			var current = Util.as_int(spec.get("default", {}).get(spec["key"], spec["min"])) if spec.get("default") is Dictionary else spec["min"]
+			out.append({"label": "", "input": null})
 			for value in [spec["min"], int((spec["min"] + spec["max"]) / 2), spec["max"]]:
-				if not (value in values):
-					values.append(value)
-			var numbers = []
-			for value in values:
-				numbers.append({"label": str(value), "input": value})
-			return numbers
+				if value != current and not _has_input(out, value):
+					out.append({"label": str(value), "input": value})
+		"bool":
+			var name = str(spec.get("path", "")).get_file()
+			var flip = not bool(spec.get("default", false))
+			out = [{"label": "", "input": null}, {"label": (name + " " if name != "" else "") + ("on" if flip else "off"), "input": flip}]
 		"option":
-			var options = []
+			var current = str(spec.get("default", {}).get("name", "")) if spec.get("default") is Dictionary else ""
+			out.append({"label": "", "input": null})
 			for choice in spec.get("choices", []):
-				if not (choice in spec.get("disabled", [])) and options.size() < MAX_CHOICES:
-					options.append({"label": str(choice), "input": choice})
-			return options if not options.empty() else [{"label": "", "input": null}]
+				if choice != current and not (choice in spec.get("disabled", [])) and out.size() < MAX_CHOICES:
+					out.append({"label": str(choice), "input": choice})
 		"choice":
-			var choices = []
+			out.append({"label": "", "input": null})
 			for i in range(min(spec.get("values", []).size(), MAX_CHOICES)):
-				choices.append({"label": str(spec["choices"][i]), "input": spec["choices"][i]})
-			return choices if not choices.empty() else [{"label": "", "input": null}]
-	return [{"label": "", "input": null}]
+				if spec["choices"][i] != spec.get("default_choice", ""):
+					out.append({"label": str(spec["choices"][i]), "input": spec["choices"][i]})
+		"object":
+			out.append({"label": "", "input": null})
+			for field in spec.get("fields", {}):
+				var field_spec = spec["fields"][field]
+				for variant in variants(field_spec, forward, spec_facing):
+					if variant["label"] == "" or out.size() >= MAX_FIELD_VARIANTS:
+						continue
+					# A choice or a direction names itself ("Low", "back"); others need the field.
+					var named = field_spec.get("kind") in ["choice", "direction8"]
+					out.append({"label": variant["label"] if named else "%s %s" % [field, variant["label"]], "input": {field: variant["input"]}})
+	return out if not out.empty() else [{"label": "", "input": null}]
 
 
-# The spec as seen with the fighter facing `forward`, so direction pickers
-# accept the mirrored names (their allowed list was read facing spec_facing).
-static func facing_spec(spec: Dictionary, forward: int, spec_facing: int) -> Dictionary:
-	if forward == spec_facing or spec.get("kind", "") != "direction8":
-		return spec
-	var mirrored = spec.duplicate(true)
+static func _has_input(list: Array, input) -> bool:
+	for entry in list:
+		if Util.json_str(entry["input"]) == Util.json_str(input):
+			return true
+	return false
+
+
+# The move's default aim, then each compass aim the pad allows at full
+# strength, then (on pads with few aims, unless the move always uses full
+# length) the same aims at half strength.
+static func _aims(spec: Dictionary, forward: int, flipped: bool) -> Array:
+	var out = [{"label": "", "input": _mirror_xy(spec.get("default"), flipped)}]
 	var allowed = []
-	for name in spec.get("allowed", []):
-		allowed.append(MIRRORED.get(name, name))
-	mirrored["allowed"] = allowed
-	return mirrored
+	for aim in COMPASS:
+		if aim_allowed(spec, aim[1]):
+			allowed.append(aim)
+	var strengths = [[1.0, ""]]
+	if not bool(spec.get("always_max", false)) and allowed.size() <= FEW_AIMS:
+		strengths.append([HALF_STRENGTH, " half"])
+	for strength in strengths:
+		for aim in allowed:
+			var input = aim_input(aim[1], strength[0], forward)
+			if not _has_input(out, input):
+				out.append({"label": aim[0] + strength[1], "input": input})
+	return out
+
+
+# Whether the pad can aim `degrees` (screen degrees from the forward side, up
+# = -90): within its angle limit (centered on limit_center_degrees, which the
+# game mirrors to the facing side) and on its half or quarter of the circle.
+static func aim_allowed(spec: Dictionary, degrees: float) -> bool:
+	if bool(spec.get("limit_angle", false)):
+		var diff = fposmod(degrees - float(spec.get("limit_center_degrees", 0)) + 180.0, 360.0) - 180.0
+		if abs(diff) > float(spec.get("limit_range_degrees", 360)) / 2.0 + 0.5:
+			return false
+	var y = sin(deg2rad(degrees))
+	var x = cos(deg2rad(degrees))
+	var panel = str(spec.get("panel", "full"))
+	if panel in ["half", "quarter"] and (y < -0.01 if bool(spec.get("bottom_half", false)) else y > 0.01):
+		return false
+	if panel == "quarter" and (x > 0.01 if bool(spec.get("left_quarter", false)) else x < -0.01):
+		return false
+	return true
+
+
+static func aim_input(degrees: float, strength: float, forward: int) -> Dictionary:
+	var radians = deg2rad(degrees)
+	return {"x": int(round(cos(radians) * PayloadSpec.XY_RANGE * strength)) * forward, "y": int(round(sin(radians) * PayloadSpec.XY_RANGE * strength))}
+
+
+# The spec as seen with the fighter's opponent on the `forward` side: direction
+# pickers accept the mirrored names (their allowed list was read facing
+# spec_facing) and aim pads know where forward is, to apply their angle limit.
+static func facing_spec(spec: Dictionary, forward: int, spec_facing: int) -> Dictionary:
+	match spec.get("kind", ""):
+		"direction8":
+			if forward == spec_facing:
+				return spec
+			var mirrored = spec.duplicate(true)
+			var allowed = []
+			for name in spec.get("allowed", []):
+				allowed.append(MIRRORED.get(name, name))
+			mirrored["allowed"] = allowed
+			return mirrored
+		"xy":
+			var aimed = spec.duplicate()
+			aimed["forward"] = forward
+			return aimed
+		"object":
+			var fields = {}
+			for field in spec.get("fields", {}):
+				fields[field] = facing_spec(spec["fields"][field], forward, spec_facing)
+			var whole = spec.duplicate()
+			whole["fields"] = fields
+			return whole
+	return spec
 
 
 static func _mirror_xy(value, flipped: bool):
@@ -208,6 +284,19 @@ static func describe_state(fighter, action: String) -> String:
 		return action
 	var title = str(Util.prop(state, "title", ""))
 	return "%s (%s)" % [title if title != "" else action, Util.enum_name(ACTION_TYPES, Util.prop(state, "type", 0))]
+
+
+# A fighter at a glance, to show (and check) where a run starts.
+static func describe(fighter) -> Dictionary:
+	return {
+		"hp": Util.as_int(Util.prop(fighter, "hp", 0)),
+		"position": Util.xy(Util.call_or(fighter, "get_pos", [], Vector2.ZERO)),
+		"state": str(Util.prop(Util.call_or(fighter, "current_state"), "state_name", "?")),
+		"facing": "right" if Util.as_int(Util.call_or(fighter, "get_facing_int", [], 1), 1) >= 0 else "left",
+		"meter_bars": Util.as_int(Util.prop(fighter, "supers_available", 0)),
+		"bursts": Util.as_int(Util.prop(fighter, "bursts_available", 0)),
+		"air_options": Util.as_int(Util.prop(fighter, "air_movements_left", 0)),
+	}
 
 
 static func snapshot(fighter) -> Dictionary:

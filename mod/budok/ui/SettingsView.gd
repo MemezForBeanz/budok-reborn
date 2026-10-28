@@ -225,13 +225,13 @@ func _models_tab() -> Control:
 	var look = _section(box, "Lookahead")
 	_field(look, "ai.core.depth", "Turns each line looks ahead", "int", [0, 30])
 	_field(look, "ai.core.candidates", "Own moves compared", "int", [1, 8])
-	_field(look, "ai.core.replies", "Opponent replies per move", "int", [1, 8])
 	_field(look, "ai.core.think_s", "Thinking time per turn (s)", "int", [3, 600])
 	_field(look, "ai.decide.pick", "Decision bot picks", "option", [["sample", "Drawn from the odds"], ["best", "Always the top move"]])
 	_field(look, "ai.core.max_options", "Options per question", "int", [2, 255])
 	_field(look, "ai.core.request_timeout_s", "Request timeout (s)", "int", [2, 300])
 	_field(look, "ai.core.frame_budget_ms", "Simulation ms per frame", "int", [1, 100])
-	look.add_child(_note("Deep lines run one per parallel request; each turn of a line is one request. Depth 0 turns simulations off. "
+	look.add_child(_note("Each move (yours, plus your blocks and dodges) is first played against every opponent reply for one exchange; "
+		+ "then deep lines run, one per parallel request, each turn of a line one request. Depth 0 turns simulations off. "
 		+ "More ms per frame thinks faster but makes the game less smooth. Lower the options per question if a model rejects requests."))
 
 	box.add_child(_header("Notes writer"))
