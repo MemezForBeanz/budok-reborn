@@ -178,6 +178,8 @@ func _play_tab() -> Control:
 	var sims = _section(box, "Simulations")
 	_field(sims, "simulation.enabled", "Bots may simulate moves", "bool")
 	_field(sims, "simulation.max_ticks", "Ticks per simulated turn", "int", [10, 300])
+	_field(sims, "simulation.reuse_previews", "Reuse previews (game characters only)", "bool")
+	sims.add_child(_note("Previews of characters from mods are always fresh copies."))
 	var other = _section(box, "Interface and logs")
 	_field(other, "ui.show_button", "Corner budok button", "bool")
 	_field(other, "ui.toggle_key", "Overlay key", "string")

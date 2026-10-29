@@ -29,7 +29,7 @@ func _process(delta: float) -> void:
 		return
 	_timer = 0.0
 	var tree = get_tree()
-	var options = tree.root.find_node("OptionsContainer", true, false) if tree != null else null
+	var options = Util.find_named(tree.root, "OptionsContainer", Util.game_worlds(runtime)) if tree != null else null
 	if options == null:
 		return
 	var back = options.find_node("OptionsBackButton", true, false)

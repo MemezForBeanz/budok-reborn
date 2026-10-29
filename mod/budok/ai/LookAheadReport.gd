@@ -139,8 +139,10 @@ static func _combo_view(analysis: Dictionary, full: bool) -> Dictionary:
 	var out = {"you_are": ("attacking: the opponent can only DI, burst or wait" if attacking
 			else "being hit (or stuck in a move): you can only DI, burst or wait, and the routes are the opponent's"),
 		"goal": solved["goal"],
-		"searched": "%d exchanges in %.1f s: %d first moves, %d rounds deeper%s" % [searched["exchanges"], searched["ms"] / 1000.0, searched["options"],
-			searched["rounds"], "; routes were still going when the thinking time ran out (ai.core.think_s)" if searched["stop"] == "out_of_time" else ""]}
+		"searched": "%d exchanges in %.1f s: %d first moves, %d rounds deeper%s%s" % [searched["exchanges"], searched["ms"] / 1000.0, searched["options"],
+			searched["rounds"], "; routes were still going when the thinking time ran out (ai.core.think_s)" if searched["stop"] == "out_of_time" else "",
+			("; a character from a mod is playing, so every preview is a fresh copy of the match (slower, and no defender switching DI)"
+				if searched.get("fresh_copies", false) else "")]}
 	var plans = solved["plans"]
 	out["best_route" if attacking else "their_best_route"] = _route_view(plans[0], attacking, full)
 	var others = []

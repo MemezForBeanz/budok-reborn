@@ -6,6 +6,35 @@ extends Reference
 # if a game update renames a class, so we never reference game class_names.
 
 
+# The first node named `name` under `root` (depth first), without looking
+# inside `skip`: Node.find_node walks every node, and a match (each of
+# budok's previews too) holds thousands, none of them UI.
+static func find_named(root: Node, name: String, skip: Array = []):
+	var stack = [root]
+	while not stack.empty():
+		var node = stack.pop_back()
+		if str(node.name) == name:
+			return node
+		if node in skip:
+			continue
+		var children = node.get_children()
+		for i in range(children.size() - 1, -1, -1):
+			stack.append(children[i])
+	return null
+
+
+# The game worlds a UI search can skip: the live match and the previews.
+static func game_worlds(runtime) -> Array:
+	var out = []
+	var current = prop(autoload("Global"), "current_game", null)
+	if valid(current):
+		out.append(current)
+	var sandbox = prop(prop(runtime, "simulator", null), "_sandbox", null)
+	if valid(sandbox):
+		out.append(sandbox)
+	return out
+
+
 static func has_prop(obj, name: String) -> bool:
 	if obj == null:
 		return false

@@ -72,9 +72,10 @@ const SWITCHING := "DI switching each hit"
 # Checking routes against DI (step 3) stops at this share of the time; the
 # rest is for the switching defender and escapes.
 const CHECK_SHARE := 0.8
-# Moves to play from one position before copying it pays off over replaying
-# the route to it for each.
-const FORK_MIN := 6
+# Copying a position deep in a route (a new preview: tens of ms in one frame,
+# and as much to free) pays off over replaying the route to it for each move
+# once that would replay FORK_TICKS ticks.
+const FORK_TICKS := 400
 const CONTINUE_BONUS := 50.0
 # What the goals add to a route's value: ending where the defender acts first
 # ("safe"), each unit the defender was carried toward the wall behind them
@@ -111,6 +112,9 @@ var _refined := {}
 var _root_forward := 1
 var _root_options := {}
 var _error := ""
+# Whether previews of this match are reused (Simulator.reusable): copying a
+# position mid-route and the switching defender need it.
+var _reusable := true
 
 
 func _init(runtime_ref) -> void:
@@ -151,6 +155,8 @@ func solve(ctx_ref: Dictionary, attacker_side: String, deadline_ms: int, options
 	for side in [attacker, defender]:
 		_start[side] = Lookahead.fighter_view(game, side)
 	_hp = lookahead.start_of(ctx, game)
+	_reusable = runtime.simulator.reusable(game)
+	stats["fresh_copies"] = not _reusable
 	_root_options = {attacker: lookahead.live_options(ctx, attacker, 0, "all"), defender: lookahead.live_options(ctx, defender)}
 	_root_forward = Lookahead._forward(Lookahead._fighter(game, defender))
 	var compass = _compass()
@@ -253,7 +259,7 @@ func solve(ctx_ref: Dictionary, attacker_side: String, deadline_ms: int, options
 		_rate(plan)
 	plans.sort_custom(self, "_better")
 	# 4. a defender switching DI at every hit, against the leader until it holds the lead
-	for _i in range(VALIDATE if bool(options.get("switching", true)) else 0):
+	for _i in range(VALIDATE if bool(options.get("switching", true)) and _reusable else 0):
 		var leader = plans[0] if not plans.empty() else {}
 		if leader.empty() or not leader["validated"] or leader.get("switched", false) or _out_of_time():
 			break
@@ -371,7 +377,10 @@ func _play(route: Dictionary, options: Array, defense: Dictionary):
 	var out = []
 	var fork = null
 	var here = _key(route["path"])
-	if not route["path"].empty() and options.size() >= FORK_MIN:
+	var replayed = 0
+	for step in route["result"]["steps"]:
+		replayed += int(step.get("ticks", 0))
+	if not route["path"].empty() and replayed * (options.size() - 1) >= FORK_TICKS and _reusable:
 		var standing = _goto(route["path"])
 		if standing is GDScriptFunctionState:
 			standing = yield(standing, "completed")

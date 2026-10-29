@@ -70,6 +70,7 @@ func _ready() -> void:
 	sources = SourceBrowser.new()
 	sources.max_file_bytes = int(config.get_value("source_access.max_file_bytes", 200000))
 	simulator = _add(Simulator.new(), "Simulator")
+	simulator.config = config
 	matches = _add(MatchController.new(), "Matches")
 	matches.setup(self)
 	lookahead = _add(Lookahead.new(), "Lookahead")

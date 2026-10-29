@@ -11,7 +11,8 @@ extends Node
 #     gets a few more), someone is KO'd or time runs out;
 #   - play_path(): a given sequence of both fighters' moves (the combo
 #     solver, core/ComboSolver.gd, searches with it).
-# All runs share a per-frame tick budget, so the game stays responsive, and
+# All runs share one frame budget with making and freeing previews
+# (Simulator.charge), so the game stays responsive, and
 # only wait for the next frame when it is spent.
 #
 # An option is one concrete move: {"label", "action", "input", "di",
@@ -39,8 +40,6 @@ var ticks_total := 0
 # {pair key: outcome}, "check"}}.
 var _played := {}
 var _spawning := false
-var _frame := -1
-var _spent_usec := 0
 
 
 func setup(runtime_ref) -> void:
@@ -321,7 +320,7 @@ func run_line(ctx: Dictionary, root: Dictionary, depth: int, policy, deadline_ms
 # or reuse()): path[0] has the moves of the slots choosing now, each later
 # entry the moves at the decision point after the one before ({side: option};
 # a side without one holds). Yields (and must be awaited) only when the
-# frame's tick budget runs out. Returns {"steps": [outcome as play_step],
+# frame budget runs out. Returns {"steps": [outcome as play_step],
 # "node" (as node_at)}, or {"gone": true} when the preview was freed.
 func play_path(ctx: Dictionary, sim, path: Array, with_options: bool = true):
 	var start = start_of(ctx, sim)
@@ -349,7 +348,7 @@ func start_of(ctx: Dictionary, sim) -> Dictionary:
 # to the next one: at_root, the live decision point (only the slots choosing
 # there move); else a point inside the preview, where node_at (or
 # SimTurns.open_decision) already ran. Yields (and must be awaited) only when
-# the frame's tick budget runs out. Returns null when the preview was freed,
+# the frame budget runs out. Returns null when the preview was freed,
 # else the outcome as _exchange with dealt and taken counted from `start` and
 # "fighters": {side: fighter_view}.
 func play_step(ctx: Dictionary, sim, picks: Dictionary, start: Dictionary, at_root: bool = false):
@@ -447,7 +446,7 @@ func situation(ctx: Dictionary) -> Dictionary:
 
 
 # Plays root (the moves of the slots choosing now) up to the next decision
-# point. Yields (and must be awaited) only when the frame's tick budget runs
+# point. Yields (and must be awaited) only when the frame budget runs
 # out. Returns {"dealt", "taken", "ko", "states", "next_turn"?, "ticks",
 # "stop": decision, ko, stuck or gone, "step": {"you"?, "opponent"?},
 # "fighters"} (see play_step).
@@ -506,16 +505,16 @@ func preview() -> Dictionary:
 
 # A preview that played something, put back to the game it was copied from
 # (source: the live match by default, or the preview it was forked from); its
-# cost counts toward the frame's budget. Yields (and must be awaited) only
-# when the budget is spent. Returns the preview, or null when it could not be
-# reset (it is freed then: take another).
+# cost counts toward the frame budget (Simulator.charge). Yields (and must be
+# awaited) only when the budget is spent. Returns the preview, or null when it
+# could not be reset (it is freed then: take another).
 func reuse(sim, source = null):
 	var waited = _await_budget()
 	if waited is GDScriptFunctionState:
 		yield(waited, "completed")
 	var started = OS.get_ticks_usec()
 	var reset = runtime.simulator.reset(sim, source if source != null else runtime.matches.game)
-	_spent_usec += OS.get_ticks_usec() - started
+	runtime.simulator.charge(started)
 	if not reset:
 		runtime.simulator.discard(sim)
 		return null
@@ -524,15 +523,18 @@ func reuse(sim, source = null):
 
 # Ticks until a decision point; returns {"reached": decision, ko, stuck (the
 # tick limit) or gone (the preview was freed), "ticks"}. Yields (and must be
-# awaited) only when the frame's tick budget runs out.
+# awaited) only when the frame budget runs out.
 func _tick_to_decision(sim, max_ticks: int):
-	var budget = _budget_usec()
+	var simulator = runtime.simulator
 	# The game's replay resimulation flag skips particles, afterimages and
 	# sounds (deferred work no one sees in a preview) and nothing that plays out.
+	# It also frees spawned effects at the end of the frame while a state may
+	# still hold one: the game's own characters check before using them, a
+	# mod's may not, so theirs keep their effects (freed with the preview).
 	var replays = Util.autoload("ReplayManager")
-	var flag = Util.has_prop(replays, "resimulating")
+	var flag = Util.has_prop(replays, "resimulating") and Util.valid(sim) and simulator.vanilla(sim)
 	for ticks in range(max_ticks):
-		while _spent_this_frame() >= budget:
+		while simulator.over_budget():
 			yield(get_tree(), "idle_frame")
 		if not Util.valid(sim):
 			return {"reached": "gone", "ticks": ticks}
@@ -544,7 +546,7 @@ func _tick_to_decision(sim, max_ticks: int):
 		sim.tick()
 		if flag:
 			replays.resimulating = resimulating
-		_spent_usec += OS.get_ticks_usec() - started
+		simulator.charge(started)
 		ticks_total += 1
 		# Read directly: this runs every tick.
 		var p1 = sim.p1
@@ -556,23 +558,10 @@ func _tick_to_decision(sim, max_ticks: int):
 	return {"reached": "stuck", "ticks": max_ticks}
 
 
-# Waits for the next frame when this one's tick budget is spent.
+# Waits for the next frame when this one's budget is spent.
 func _await_budget():
-	while _spent_this_frame() >= _budget_usec():
+	while runtime.simulator.over_budget():
 		yield(get_tree(), "idle_frame")
-
-
-func _budget_usec() -> int:
-	return int(clamp(float(runtime.config.get_value("ai.core.frame_budget_ms", 12)), 1.0, 100.0) * 1000.0)
-
-
-# Engine time all runs spent during this frame.
-func _spent_this_frame() -> int:
-	var frame = Engine.get_idle_frames()
-	if frame != _frame:
-		_frame = frame
-		_spent_usec = 0
-	return _spent_usec
 
 
 func _outcome(ctx: Dictionary, sim, start: Dictionary) -> Dictionary:

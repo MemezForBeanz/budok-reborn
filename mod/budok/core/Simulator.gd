@@ -16,8 +16,16 @@ const NEUTRAL_EXTRA := {"DI": {"x": 0, "y": 0}, "reverse": false, "feint": false
 # Restored by hand on reuse: the objects are copied again and objs_map is the
 # dictionary every object shares (its size seeds each new object's RNG).
 const KEEP_GAME_VARS := ["objects", "effects", "objs_map"]
-const MAX_POOL := 16
+const MAX_POOL := 8
+# Objects and effects a reused preview keeps out of play (see reset) before it
+# is replaced by a fresh one.
+const MAX_PARKED := 256
+# Characters whose previews may be reset and reused: the game's own. A mod's
+# copy code, objects or native parts may not survive a second copy into the
+# same preview, so theirs are always fresh copies, as the game's own ghost.
+const VANILLA_PREFIX := "res://characters/"
 
+var config = null
 var _busy := false
 var _sandbox: Viewport = null
 # Previews ready for reuse while the live match waits on one decision point
@@ -26,6 +34,11 @@ var _sandbox: Viewport = null
 var _pool := []
 var _pool_key := ""
 var _bases := {}
+# The frame budget's debt (see charge) and the previews waiting to be freed,
+# one per frame ([game, parked nodes]).
+var _debt_usec := 0
+var _debt_frame := 0
+var _doomed := []
 
 
 # actions: {"p1": {"action", "data", "extra"} or null, "p2": ...}
@@ -68,15 +81,22 @@ func run(game, actions: Dictionary, choosing: Array, max_ticks: int, viewer_slot
 
 # Coroutine: a hidden preview game holding a copy of the live match, ready to
 # tick. Returns {"ok", "game"} or {"ok": false, "error"}; free it with discard().
-# Several can exist at once (lookahead runs one per line). reusable: remember
-# what reset() needs, so take() can hand it out again after give_back().
-func spawn(game, reusable: bool = false) -> Dictionary:
+# Several can exist at once (lookahead runs one per line). for_reuse: remember
+# what reset() needs, so take() can hand it out again after give_back() (only
+# for characters that may be reused). The work is spread over frames within
+# the frame budget; `game` must not tick meanwhile (a decision point).
+func spawn(game, for_reuse: bool = false) -> Dictionary:
 	yield(get_tree(), "idle_frame")
+	var paced = _pace()
+	if paced is GDScriptFunctionState:
+		yield(paced, "completed")
 	if not Util.valid(game) or not bool(Util.prop(game, "game_started", false)):
 		return {"ok": false, "error": "no match in progress"}
 	var packed = load(GAME_SCENE)
 	if packed == null:
 		return {"ok": false, "error": "cannot load %s in this game build" % GAME_SCENE}
+	var key = _key(game)
+	var started = OS.get_ticks_usec()
 	var sim = packed.instance()
 	sim.is_ghost = true
 	_viewport().add_child(sim)
@@ -89,32 +109,187 @@ func spawn(game, reusable: bool = false) -> Dictionary:
 	# Ghost games refuse to tick when the match disabled the preview.
 	if Util.has_prop(sim, "prediction_enabled"):
 		sim.prediction_enabled = true
+	charge(started)
 	yield(get_tree(), "idle_frame")
-	if not Util.valid(game) or not Util.valid(sim):
+	paced = _pace()
+	if paced is GDScriptFunctionState:
+		yield(paced, "completed")
+	if not Util.valid(game) or not Util.valid(sim) or _key(game) != key:
 		discard(sim)
-		return {"ok": false, "error": "match ended during simulation setup"}
-	var base = _before_copy(sim) if reusable else {}
-	game.copy_to(sim)
+		return {"ok": false, "error": "the match moved on during simulation setup"}
+	var split = reusable(game)
+	for_reuse = for_reuse and split
+	var base = _before_copy(sim) if for_reuse else {}
+	started = OS.get_ticks_usec()
+	var rest = _copy_current(sim, game) if split else {}
+	if not split:
+		game.copy_to(sim)
+	charge(started)
+	# The other states, a frame's budget at a time.
+	for id in rest:
+		for name in rest[id]:
+			if over_budget():
+				paced = _pace()
+				if paced is GDScriptFunctionState:
+					yield(paced, "completed")
+				if not Util.valid(game) or not Util.valid(sim) or _key(game) != key:
+					discard(sim)
+					return {"ok": false, "error": "the match moved on during simulation setup"}
+			started = OS.get_ticks_usec()
+			game.get_player(id).state_machine.states_map[name].copy_to(sim.get_player(id).state_machine.states_map[name])
+			charge(started)
 	_settle(sim, game)
-	if reusable:
+	if for_reuse:
 		_after_copy(sim, base)
 	return {"ok": true, "game": sim}
 
 
+# game.copy_to(sim) with only each fighter's states that the copy enters (the
+# live current state and its stack, and the preview's own): copy_to copies
+# every state in the target's map, which is most of its cost. Returns {id:
+# [the other states' names]}, to copy one by one (ObjectState.copy_to, as
+# copy_to does). Only for the game's own characters.
+static func _copy_current(sim, game) -> Dictionary:
+	var full = {}
+	for id in [1, 2]:
+		var machine = sim.get_player(id).state_machine
+		var live = game.get_player(id).state_machine
+		var keep = {str(live.state.name): true, str(machine.state.name): true}
+		for state in live.states_stack + machine.states_stack:
+			keep[str(state.name)] = true
+		var some = {}
+		for name in keep:
+			if machine.states_map.has(name):
+				some[name] = machine.states_map[name]
+		full[id] = machine.states_map
+		machine.states_map = some
+	game.copy_to(sim)
+	var rest = {}
+	for id in [1, 2]:
+		var machine = sim.get_player(id).state_machine
+		var some = machine.states_map
+		machine.states_map = full[id]
+		rest[id] = []
+		for name in full[id]:
+			if not some.has(name) and game.get_player(id).state_machine.states_map.has(name):
+				rest[id].append(name)
+	return rest
+
+
+# Whether previews of `game` (the live match or a preview) may be reset and
+# reused, and copied in parts: both fighters are the game's own characters,
+# and simulation.reuse_previews is on.
+func reusable(game) -> bool:
+	return vanilla(game) and (config == null or bool(config.get_value("simulation.reuse_previews", true)))
+
+
+# Whether both fighters of `game` are the game's own characters.
+static func vanilla(game) -> bool:
+	for id in [1, 2]:
+		if not str(Util.prop(Util.call_or(game, "get_player", [id]), "filename", "")).begins_with(VANILLA_PREFIX):
+			return false
+	return true
+
+
+# A preview no one uses any more: it is freed, with what it kept aside, a
+# part per frame from the next frame on (see _on_idle_frame).
 func discard(sim) -> void:
-	if Util.valid(sim):
-		_bases.erase(sim.get_instance_id())
-		sim.queue_free()
+	if not Util.valid(sim):
+		return
+	var base = _bases.get(sim.get_instance_id(), {})
+	_bases.erase(sim.get_instance_id())
+	_pool.erase(sim)
+	for entry in _doomed:
+		if entry[0] == sim:
+			return
+	_doomed.append([sim] + base.get("parked", []))
+
+
+func _ready() -> void:
+	# Connected before any run waits for a frame, so frees come first in it.
+	get_tree().connect("idle_frame", self, "_on_idle_frame")
+
+
+# Frees discarded previews a part per frame, at the start of a frame that has
+# room: first the preview leaves the tree (nothing in it runs again) with what
+# it kept aside, then each fighter, then the rest (each part 10-30 ms).
+func _on_idle_frame() -> void:
+	if _doomed.empty() or _debt() > _budget_usec() / 4:
+		return
+	var started = OS.get_ticks_usec()
+	var entry = _doomed[0]
+	var sim = entry[0]
+	if Util.valid(sim) and sim.is_inside_tree():
+		sim.get_parent().remove_child(sim)
+		for node in entry.slice(1, entry.size() - 1) if entry.size() > 1 else []:
+			if Util.valid(node):
+				node.free()
+	else:
+		var part = null
+		for id in [1, 2]:
+			var fighter = Util.call_or(sim, "get_player", [id])
+			if part == null and Util.valid(fighter):
+				part = fighter
+		if part != null:
+			part.free()
+		else:
+			if Util.valid(sim):
+				sim.free()
+			_doomed.pop_front()
+	charge(started)
+
+
+# --- the frame budget ---
+#
+# All work on previews (making, resetting, ticking, freeing them) shares one
+# budget per frame (ai.core.frame_budget_ms), so the game stays smooth while
+# the bots think: what it costs is charged as a debt, and a budget's worth is
+# paid back each frame. Runs wait while this frame's budget is spent; a heavy
+# step (making a preview, tens of ms) waits until the debt is nearly paid, and
+# then pauses the other runs for the frames it used.
+
+# Charges the work done since started_usec (OS.get_ticks_usec()).
+func charge(started_usec: int) -> void:
+	_debt()
+	_debt_usec += OS.get_ticks_usec() - started_usec
+
+
+# Whether this frame's budget is spent: runs wait for the next frame.
+func over_budget() -> bool:
+	return _debt() >= _budget_usec()
+
+
+# Coroutine-like: before a heavy step, waits frame by frame until the debt is
+# nearly paid and no discarded preview is left to free. Yields only when it
+# waits.
+func _pace():
+	while _debt() > _budget_usec() / 4 or not _doomed.empty():
+		yield(get_tree(), "idle_frame")
+
+
+# What is still to pay back, after a budget per frame passed.
+func _debt() -> int:
+	var frame = Engine.get_idle_frames()
+	if frame != _debt_frame:
+		_debt_usec = int(max(0, _debt_usec - (frame - _debt_frame) * _budget_usec()))
+		_debt_frame = frame
+	return _debt_usec
+
+
+func _budget_usec() -> int:
+	var ms = config.get_value("ai.core.frame_budget_ms", 12) if config != null else 12
+	return int(clamp(float(ms), 1.0, 100.0) * 1000.0)
 
 
 # --- reusable previews ---
 #
-# A full copy (spawn) costs about five frames of work, most of it copying all
-# ~120 states of each fighter. A preview that played a line is put back by
-# restoring only what a line changes: the game's and the fighters' variables
-# as they were right after the first copy, the objects, and the states the
-# line entered (copied from the live match again). Checked against fresh
-# copies over many lines: same results tick for tick.
+# A fresh copy (spawn) costs tens of ms, most of it copying all ~120 states of
+# each fighter, and as much again to free. A preview that played a line is put
+# back by restoring only what a line changes: the game's and the fighters'
+# variables as they were right after the first copy, the objects, and the
+# states the line entered (copied from the live match again). Checked against
+# fresh copies over many lines: same results tick for tick. Only for the
+# game's own characters (reusable()).
 
 # Coroutine: a preview of the live match at its current decision point, used
 # before when one is free. Returns {"ok", "game"} or {"ok": false, "error"};
@@ -133,7 +308,7 @@ func take(game) -> Dictionary:
 			return {"ok": true, "game": sim}
 		discard(sim)
 	var spawned = yield(spawn(game, true), "completed")
-	if spawned["ok"]:
+	if spawned["ok"] and _bases.has(spawned["game"].get_instance_id()):
 		_bases[spawned["game"].get_instance_id()]["key"] = key
 	return spawned
 
@@ -141,8 +316,12 @@ func take(game) -> Dictionary:
 # Coroutine: a reusable copy of `source`, a preview standing at a decision
 # point; reset(copy, source) puts it back to that point, as long as source
 # does not tick meanwhile. Free it with discard(). Returns {"ok", "game"} or
-# {"ok": false, "error"}.
+# {"ok": false, "error"}; refused for characters whose previews are not
+# reused (a copy used once does not pay off).
 func fork(source) -> Dictionary:
+	if not Util.valid(source) or not reusable(source):
+		yield(get_tree(), "idle_frame")
+		return {"ok": false, "error": "previews of these characters are not reused"}
 	var spawned = yield(spawn(source, true), "completed")
 	if spawned["ok"]:
 		_bases[spawned["game"].get_instance_id()]["key"] = _key(source)
@@ -165,7 +344,7 @@ func give_back(sim) -> void:
 
 
 func release_pool() -> void:
-	for sim in _pool:
+	for sim in _pool.duplicate():
 		discard(sim)
 	_pool.clear()
 	_pool_key = ""
@@ -187,6 +366,7 @@ func _after_copy(sim, base: Dictionary) -> void:
 	base["game"] = _variables(sim)
 	base["fighters"] = {}
 	base["touched"] = {}
+	base["parked"] = []
 	for id in [1, 2]:
 		var fighter = sim.get_player(id)
 		base["fighters"][id] = _variables(fighter)
@@ -208,21 +388,25 @@ func _on_state_changed(stack, touched: Dictionary) -> void:
 # from, right away (no frame passes). False when that cannot be done or did
 # not work out: the caller then discards it and takes another.
 func reset(sim, game) -> bool:
-	if not Util.valid(sim) or not Util.valid(game):
+	if not Util.valid(sim) or not Util.valid(game) or not reusable(game):
 		return false
 	var base = _bases.get(sim.get_instance_id())
 	if base == null or base.get("key", "") != _key(game):
 		return false
-	# Game.copy_to frees the target's objects while they leave its list, and
-	# its effects list keeps particles that are already gone: clear both first.
-	for fx in sim.effects:
-		if Util.valid(fx):
-			fx.free()
-	sim.effects.clear()
-	for obj in sim.objects.duplicate():
-		if Util.valid(obj):
-			obj.free()
-	sim.objects.clear()
+	# Game.copy_to frees the target's objects (the game only ever copies into a
+	# fresh one). Here they may still be pointed at from inside the preview (a
+	# fighter, its native physics body, a state's effect), so they leave play
+	# instead and are freed with the preview itself (discard).
+	var parked = base["parked"]
+	if parked.size() + sim.objects.size() + sim.effects.size() > MAX_PARKED:
+		return false
+	for list in [sim.effects, sim.objects]:
+		for node in list.duplicate():
+			if Util.valid(node):
+				if node.get_parent() != null:
+					node.get_parent().remove_child(node)
+				parked.append(node)
+		list.clear()
 	_restore(sim, base["game"], KEEP_GAME_VARS)
 	sim.objs_map.clear()
 	for key in base["objs_map"]:
@@ -293,6 +477,7 @@ static func _restore(obj, values: Dictionary, skip: Array) -> void:
 # clocks follow, and the turn flags its decision point set.
 static func _settle(sim, game) -> void:
 	_align_names(sim, game)
+	_rename_hitboxes(sim, game)
 	var objs_map = Util.prop(sim, "objs_map", {})
 	for key in objs_map:
 		if Util.valid(objs_map[key]):
@@ -330,6 +515,36 @@ static func _align_names(sim, game) -> void:
 	map.clear()
 	for key in source:
 		map[key] = by_name.get(str(key))
+
+
+# An object copy is named by the copy's count when it is made (its hitboxes
+# too: "3_HB_0"), then takes its source's name ("4"), so its states looked for
+# hitboxes named for the source and did not copy their state ("Node not
+# found"). Name the hitboxes for the object's name and copy that state again.
+static func _rename_hitboxes(sim, game) -> void:
+	var sources = {}
+	for obj in Util.prop(game, "objects", []):
+		if Util.valid(obj):
+			sources[str(obj.obj_name)] = obj
+	for obj in sim.objects:
+		if not Util.valid(obj) or not obj.has_method("setup_hitbox_names") or obj.hitboxes.empty() or str(obj.obj_name) == "":
+			continue
+		if str(obj.hitboxes[0].name).begins_with(str(obj.obj_name) + "_HB_"):
+			continue
+		obj.setup_hitbox_names()
+		var source = sources.get(str(obj.obj_name))
+		if source == null:
+			continue
+		var pos = obj.get_pos()
+		for name in source.state_machine.states_map:
+			var mine = obj.state_machine.states_map.get(name)
+			if mine == null:
+				continue
+			for hitbox in source.state_machine.states_map[name].get_children():
+				if hitbox in source.hitboxes and mine.has_node(str(hitbox.name)):
+					var copy = mine.get_node(str(hitbox.name))
+					hitbox.copy_to(copy)
+					copy.update_position(pos.x, pos.y)
 
 
 func _step(sim, max_ticks: int, viewer: String, followups: Array) -> Dictionary:

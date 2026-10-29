@@ -25,6 +25,7 @@ const Lookahead = preload("res://budok/core/Lookahead.gd")
 const ComboSolver = preload("res://budok/core/ComboSolver.gd")
 const Evidence = preload("res://budok/ai/Evidence.gd")
 const LookAheadReport = preload("res://budok/ai/LookAheadReport.gd")
+const Simulator = preload("res://budok/core/Simulator.gd")
 
 var failures := 0
 var checks := 0
@@ -44,6 +45,7 @@ func _init() -> void:
 	_test_decisions()
 	_test_sim_turns()
 	_test_combo_helpers()
+	_test_previews()
 	_test_talk_and_playbook()
 	print("%d checks, %d failures" % [checks, failures])
 	quit(failures)
@@ -576,3 +578,39 @@ func _test_reversed_options() -> void:
 	var aims = ComboSolver._neighbours({"action": "Slash", "input": {"x": -100, "y": 0}, "description": "", "reverse": true}, {"kind": "xy", "always_max": true}, -1)
 	check(aims.size() == 2 and aims[0]["reverse"] and aims[0]["input"]["x"] == -92 and aims[0]["label"].ends_with(" reversed")
 		and ComboSolver._family(turned) == "Dash reversed" and ComboSolver._family(straight) == "Dash", "finer aims of a reversed move stay reversed, turned with it")
+
+
+func _test_previews() -> void:
+	var root = Node.new()
+	var menu = Node.new()
+	menu.name = "Menu"
+	var target = Node.new()
+	target.name = "OptionsContainer"
+	menu.add_child(target)
+	var world = Node.new()
+	world.name = "World"
+	var buried = Node.new()
+	buried.name = "Buried"
+	world.add_child(buried)
+	root.add_child(world)
+	root.add_child(menu)
+	check(Util.find_named(root, "OptionsContainer", [world]) == target and Util.find_named(root, "Buried", [world]) == null
+		and Util.find_named(root, "Buried") == buried, "UI searches skip the game worlds they are told to")
+	root.free()
+	var game = make("var p1\nvar p2\nfunc get_player(id):\n\treturn p1 if id == 1 else p2\n")
+	game.p1 = Node.new()
+	game.p2 = Node.new()
+	game.p1.filename = "res://characters/stickman/NinjaGuy.tscn"
+	game.p2.filename = "res://characters/swordandgun/SwordGuy.tscn"
+	var simulator = Simulator.new()
+	var vanilla = Simulator.vanilla(game) and simulator.reusable(game)
+	game.p2.filename = "res://budok_test_char/Tester.tscn"
+	check(vanilla and not Simulator.vanilla(game) and not simulator.reusable(game),
+		"previews are reused only when both fighters are the game's own characters")
+	var started = OS.get_ticks_usec()
+	simulator.charge(started - 5000)
+	var under = not simulator.over_budget()
+	simulator.charge(OS.get_ticks_usec() - 8000)
+	check(under and simulator.over_budget(), "preview work shares one frame budget (12 ms by default)")
+	for node in [game.p1, game.p2, game, simulator]:
+		node.free()

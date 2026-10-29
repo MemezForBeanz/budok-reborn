@@ -77,7 +77,8 @@
   },
   "simulation": {
     "enabled": true,
-    "max_ticks": 120
+    "max_ticks": 120,
+    "reuse_previews": true
   },
   "schemas": {
     "registry_enabled": false,

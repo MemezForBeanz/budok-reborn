@@ -42,6 +42,7 @@ behind the **budok settings** button in the game's Options window, and in the F8
 | `turns.hide_bot_panel` | `true` | Hide a bot's move panel so it can't be clicked by accident. |
 | `turns.history_length` | `12` | Turns of history shown to bots. |
 | `simulation.enabled` / `.max_ticks` | `true` / `120` | Allow `simulate`, and how far it may look ahead. |
+| `simulation.reuse_previews` | `true` | Reset and reuse preview games instead of copying the match afresh each time (much faster). Only for the game's own characters: previews of characters from mods are always fresh copies. |
 
 ## ai: separate settings for move making and schema creation
 
@@ -167,7 +168,7 @@ Lookahead settings (also `ai.core`):
 | `max_options` | `48` | Options per question (the API allows 255). Each move's default input comes first, then other aims, directions or slider values. Lower it for models that reject long lists. |
 | `think_s` | `30` | Thinking time per turn, counted from the first answer (waiting for a free request doesn't count). Everything ends 5 s before the turn timeout. |
 | `request_timeout_s` | `20` | Per request. |
-| `frame_budget_ms` | `12` | Engine time the sweep, lines and combo solver may use per frame. Higher thinks faster but makes the game less smooth. |
+| `frame_budget_ms` | `12` | Engine time all preview work (the sweep, lines and combo solver, and making and freeing previews) may use per frame, on average. Higher thinks faster but makes the game less smooth; with characters from mods, whose previews are fresh copies, lower it if the game stutters while a bot thinks. |
 
 `ai.decide.pick` (`sample` or `best`) only affects the decision controller.
 

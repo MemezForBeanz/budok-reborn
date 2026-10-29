@@ -65,25 +65,44 @@ YOMI Hustle process
 ## Previews
 
 A preview is a fresh `Game` (a ghost) the live match is copied into with the game's own `copy_to`,
-ticked by hand and never drawn. Copying all of a fighter's ~120 states is the slow part, so a preview is
-copied once per decision point and then reset: the variables it had after the copy are put back, and only
-the states a run entered are copied again. The combo solver also copies a preview mid-route
-(`Simulator.fork`) to play many moves from one position. Two things budok adds to the game's copy:
+ticked by hand and never drawn. Copying all of a fighter's ~120 states is the slow part. For the game's
+own characters, a preview is copied once per decision point and then reset: the variables it had after
+the copy are put back, and only the states a run entered are copied again. The combo solver also copies
+a preview mid-route (`Simulator.fork`) when that saves replaying enough ticks. A character from a mod is
+always copied fresh into a new preview, as the game's own ghost is: its copy code, objects or native
+parts may not survive a second copy into the same preview (`simulation.reuse_previews` turns reuse off
+for every character).
+
+Things budok adds to the game's copy:
 
 - **Object names.** Objects are found by name (`objs_map`: `"P1"`, `"P2"`, then `"3"`, `"4"`, ... by
   spawn count), and `copy_to` names the objects it makes by the copy's own count. Once the live match
   has freed an object the names disagree, and a fighter that tracks its projectile by name (Ninja's
   grappling hook) finds another object. Each copy's map is rebuilt with the source's names and size (new
   objects' RNG seeds come from its size).
+- **Hitbox names.** The same mismatch left an object's hitboxes named for its old number, so its states
+  did not copy their hitboxes (`Node not found: "4_HB_1"`): they are renamed and copied again.
 - **Fighter variables.** Entering the current state again during the copy can spend an air option or
   meter twice, so each fighter's `state_variables` are put back from the source afterwards.
+- **Nothing freed mid-preview.** The game's `copy_to` frees the target's objects, which is safe for a
+  fresh game. A reset preview still has fighters, native physics bodies and states that may point at
+  them, so a reset takes them out of play instead, and they are freed with the preview.
 
-While a preview ticks, `ReplayManager.resimulating` is set, as in the game's own resimulation: particles,
-afterimages and sounds are skipped, and nothing that plays out changes. Previews were checked against
-fresh copies (sweep exchanges, solver routes from forks, finer-DI and switching-DI branches: identical)
-and against the live match (one exchange in 120 differed, with three projectiles and a summon in
-flight; with reversed moves in two of three exchanges, hp, state, position and facing matched in 119
-of 120, one a fighter 2 pixels off).
+All work on previews (making, resetting, ticking and freeing them) shares one frame budget
+(`ai.core.frame_budget_ms`), charged as a debt and paid back a budget per frame, so the bots never take
+over the frame rate. A new preview's state copy is spread over frames (for the game's own characters),
+and a preview that is done leaves the tree and is freed a part per frame (each fighter, then the rest),
+never many at once. The budok UI hooks search the scene tree without walking into the live match or the
+previews.
+
+While a preview of the game's own characters ticks, `ReplayManager.resimulating` is set, as in the
+game's own resimulation: particles, afterimages and sounds are skipped, and nothing that plays out
+changes. (It also frees spawned effects at the end of a frame, which the game's characters check for and
+a mod's may not, so previews of mod characters keep their effects.) Previews were checked against fresh
+copies (sweep exchanges, solver routes from forks, finer-DI and switching-DI branches: identical) and
+against the live match (one exchange in 120 differed, with three projectiles and a summon in flight;
+with reversed moves in two of three exchanges, hp, state, position and facing matched in 119 of 120,
+one a fighter 2 pixels off; 40 of 40 with the test fighter from a mod).
 
 A move played reversed sets the game's `reverse` extra: entering a reversible state that is not a hurt
 state, the fighter turns to face away (`CharState`), and the aim pads turn with it. The game itself

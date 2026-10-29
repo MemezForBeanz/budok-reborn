@@ -53,7 +53,7 @@ func _process(delta: float) -> void:
 		if showing and view != null:
 			view.refresh_status()
 		return
-	var menu = _find_menu(get_tree().root, 0) if get_tree() != null else null
+	var menu = _find_menu(get_tree().root, 0, Util.game_worlds(runtime)) if get_tree() != null else null
 	var container = _find_mod_tab(menu)
 	if container == null:
 		return
@@ -113,13 +113,14 @@ func _find_mod_tab(menu):
 
 # The Mod List window is the node holding both the mod buttons and the per-mod
 # info tabs (ModLoaderMenu.gd); matched by shape so a moved script still works.
-func _find_menu(node: Node, depth: int):
+# Game worlds (skip) hold no UI.
+func _find_menu(node: Node, depth: int, skip: Array):
 	if Util.has_prop(node, "info_container") and Util.has_prop(node, "list_container") and node.has_method("add_mod"):
 		return node
-	if depth > 6:
+	if depth > 6 or node in skip:
 		return null
 	for child in node.get_children():
-		var found = _find_menu(child, depth + 1)
+		var found = _find_menu(child, depth + 1, skip)
 		if found != null:
 			return found
 	return null
