@@ -60,6 +60,8 @@ const SAMPLE_FLOOR := 0.1
 # How long an endpoint sits out after an error: a rejected key (401/403), else.
 const BAD_KEY_PAUSE_MS := 300000
 const ERROR_PAUSE_MS := 10000
+# Time an engine pick needs to also ask the decision models for candidates.
+const ENGINE_ASK_MS := 20000
 const LOOK_AHEAD_HELP := ("Play this turn ahead on the real game engine. First it plays each of your candidate moves against EVERY legal "
 	+ "opponent reply (each move and its aim, strength and direction variants, and reversed where it can Reverse) up to the next decision point, "
 	+ "and reports per move the average "
@@ -84,6 +86,8 @@ var _limit_regex := RegEx.new()
 var _retry_regex := RegEx.new()
 # Per slot, the combo route its last combo turn chose (see _remember_route).
 var _routes := {}
+# The engine's pick for each open turn a look_ahead analyzed: {token: option}.
+var _picks := {}
 
 
 func setup(runtime_ref, llm_ref) -> void:
@@ -1058,8 +1062,50 @@ func look_ahead(slot: String, args: Dictionary, limit: int) -> Dictionary:
 	var analysis = yield(analyze(slot, turn, request), "completed")
 	if not analysis["ok"]:
 		return analysis
+	_keep_pick(turn["token"], analysis)
 	analysis["notes"] = notes + analysis["notes"]
 	return LookAheadReport.summarize(analysis, str(args.get("detail", "summary")))
+
+
+# Coroutine: the engine's pick for a turn a chat model could not decide in
+# time, as a CPU opponent would play it: the best move of this turn's last
+# look_ahead, else of a quick analysis until `limit` (the decision models'
+# picks when there is time to ask them, else every move as it stands, against
+# the opponent's moves for the next exchange; on a combo turn, the combo
+# solver). Returns an option or null.
+func engine_pick(slot: String, turn: Dictionary, limit: int):
+	yield(get_tree(), "idle_frame")
+	var known = _picks.get(turn["token"])
+	if known != null:
+		return known
+	var request = {"rank": false, "limit": limit, "depth": 1}
+	if usable().empty() or limit - Util.now_ms() < ENGINE_ASK_MS:
+		var ctx = runtime.lookahead.context(slot, turn, settings()["max_options"])
+		var plain = []
+		for option in runtime.lookahead.live_options(ctx, slot):
+			if option["label"] == option["action"]:
+				plain.append(option)
+		request["candidates"] = plain
+	var analysis = yield(analyze(slot, turn, request), "completed")
+	return pick_of(analysis) if analysis["ok"] else null
+
+
+# The option of an analysis's engine pick, or null.
+static func pick_of(analysis: Dictionary):
+	var best = analysis.get("engine", {}).get("best")
+	for entry in analysis.get("candidates", []):
+		if entry["option"]["label"] == best:
+			return entry["option"]
+	return null
+
+
+func _keep_pick(token: String, analysis: Dictionary) -> void:
+	for known in _picks.keys():
+		if runtime.matches.turn_for_token(known) == null:
+			_picks.erase(known)
+	var pick = pick_of(analysis)
+	if pick != null:
+		_picks[token] = pick
 
 
 # Options for moves a chat model named. Returns {"ok", "options", "notes"

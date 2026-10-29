@@ -546,6 +546,10 @@ func _poll_slot(slot: String) -> void:
 	var buttons = _buttons(slot)
 	var fighter = Observation.fighter_of(game, slot)
 	var awaiting = ActionCatalog.is_awaiting(buttons, fighter) and bool(Util.prop(game, "game_paused", true))
+	# A bot's move panel is hidden from the frame the game shows it, and kept
+	# hidden: only the bot locks in its move.
+	if awaiting and _hides_panel(slot):
+		_set_panel_hidden(slot, true)
 	var turn = turns[slot]
 	if turn != null:
 		# The tick only moves once the turn is over. A one-tick turn can end and
@@ -802,9 +806,12 @@ func _annotated_actions(slot: String, actions: Array, detail: String) -> Array:
 
 
 func _update_panel(slot: String) -> void:
-	var should_hide = bool(runtime.config.get_value("turns.hide_bot_panel", true)) and (
+	_set_panel_hidden(slot, _hides_panel(slot))
+
+
+func _hides_panel(slot: String) -> bool:
+	return bool(runtime.config.get_value("turns.hide_bot_panel", true)) and (
 		controllers[slot] in IN_GAME_BOTS or (controllers[slot] == "mcp" and owners[slot] != ""))
-	_set_panel_hidden(slot, should_hide)
 
 
 func _set_panel_hidden(slot: String, hidden: bool) -> void:

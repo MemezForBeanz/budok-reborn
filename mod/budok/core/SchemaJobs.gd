@@ -190,6 +190,10 @@ func _run_agent() -> void:
 			NotesAgent.stop(int(_agent["pid"]))
 		if _agent["sessions"].empty():
 			_agent_error = "the notes agent %s; see %s" % ["did not connect to budok within a minute" if running else "stopped before it connected to budok", _agent["log"]]
+			var said = NotesAgent.log_tail(_agent["log"])
+			if said != "":
+				_agent_error += " (it said: %s)" % said
+			push_warning("budok: " + _agent_error)
 			_agent_retry_at = Util.now_ms() + AGENT_RETRY_MS
 		# Its sessions end with it, so their jobs go back to the queue now.
 		for session_id in _agent["sessions"]:

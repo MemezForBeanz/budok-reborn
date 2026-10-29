@@ -66,23 +66,45 @@ static func spawn(runtime) -> Dictionary:
 	if plain.search(model) == null:
 		return {"ok": false, "error": "the notes agent model may only contain letters, digits and . _ : - [ ]"}
 	# The prompt goes in on stdin and the output to the log, so a launcher
-	# script does the redirects. On Windows that is a .cmd file, since Godot does
-	# not escape quotes inside arguments; on other systems sh gets every value as
-	# a separate argument, so nothing in them is parsed as shell code.
+	# script does the redirects (and turns off update checks, which a headless
+	# run does not need). On Windows that is a .cmd file, since Godot does not
+	# escape quotes inside arguments; on other systems sh gets every value as a
+	# separate argument, so nothing in them is parsed as shell code.
 	var pid = -1
 	if OS.get_name() == "Windows":
-		var line = "\"%s\" -p --strict-mcp-config --mcp-config \"%s\" --allowedTools \"%s\"" % [command, mcp_path, PoolStringArray(allowed).join(" ")]
+		var line = "\"%s\" -p --strict-mcp-config --mcp-config \"%s\" --allowedTools \"%s\"" % [_win(command), _win(mcp_path), PoolStringArray(allowed).join(" ")]
 		if model != "":
 			line += " --model \"%s\"" % model
-		line += " < \"%s\" > \"%s\" 2>&1" % [prompt_path, log_path]
-		Util.write_text(DIR + "/run.cmd", "@echo off\r\n" + line + "\r\n")
-		pid = OS.execute("cmd.exe", ["/c", ProjectSettings.globalize_path(DIR + "/run.cmd").replace("/", "\\")], false)
+		line += " < \"%s\" > \"%s\" 2>&1" % [_win(prompt_path), _win(log_path)]
+		# Its lines are read as UTF-8 (a user folder with accents).
+		Util.write_text(DIR + "/run.cmd", "@echo off\r\nchcp 65001 >nul\r\nset DISABLE_AUTOUPDATER=1\r\n" + line + "\r\n")
+		# wscript has no console of its own: it runs the launcher with its window
+		# hidden and waits for it, so no terminal window opens. cmd.exe directly
+		# when it cannot start.
+		Util.write_text(DIR + "/run.vbs", "CreateObject(\"WScript.Shell\").Run \"\"\"\" & WScript.Arguments(0) & \"\"\"\", 0, True\r\n")
+		var launcher = _win(ProjectSettings.globalize_path(DIR + "/run.cmd"))
+		pid = OS.execute("wscript.exe", ["//B", "//Nologo", _win(ProjectSettings.globalize_path(DIR + "/run.vbs")), launcher], false)
+		if pid <= 0:
+			pid = OS.execute("cmd.exe", ["/c", launcher], false)
 	else:
-		var script = "exec \"$0\" -p --strict-mcp-config --mcp-config \"$1\" --allowedTools \"$2\" ${3:+--model \"$3\"} < \"$4\" > \"$5\" 2>&1"
+		var script = "export DISABLE_AUTOUPDATER=1; exec \"$0\" -p --strict-mcp-config --mcp-config \"$1\" --allowedTools \"$2\" ${3:+--model \"$3\"} < \"$4\" > \"$5\" 2>&1"
 		pid = OS.execute("/bin/sh", ["-c", script, command, mcp_path, PoolStringArray(allowed).join(" "), model, prompt_path, log_path], false)
 	if pid <= 0:
 		return {"ok": false, "error": "could not start %s" % command}
 	return {"ok": true, "pid": pid, "log": log_path, "command": command}
+
+
+static func _win(path: String) -> String:
+	return path.replace("/", "\\")
+
+
+# The end of the agent's log (why it stopped), or "".
+static func log_tail(log_path: String, chars: int = 300) -> String:
+	var text = Util.read_text(log_path)
+	if not (text is String):
+		return ""
+	text = text.strip_edges()
+	return ("..." + text.substr(text.length() - chars)) if text.length() > chars else text
 
 
 # On Windows the pid is the launcher's, so the whole process tree goes.

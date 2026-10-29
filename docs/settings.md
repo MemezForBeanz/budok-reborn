@@ -37,9 +37,9 @@ behind the **budok settings** button in the game's Options window, and in the F8
 | `controllers.p1` / `.p2` | `human` / `mcp` | Default controller for matches you start from the game menu. |
 | `turns.forced_turns` | `skip_unless_hurt` | Auto-submit Hold when it is the only option: `never`, `skip_unless_hurt` (keeps DI decisions) or `always`. |
 | `controllers.*` values | | `human` (you), `mcp` (a connected chatbot), `ai` (chat model with your API key, `ai.play`), `decision` (the decision core) or `tandem` (the chat model leading the decision core). |
-| `turns.timeout_s.mcp` / `.ai` / `.decision` / `.tandem` | `0` / `120` / `120` / `180` | Seconds before a bot-controlled turn falls back (0 = wait forever). |
-| `turns.fallback_action` | `Continue` | Move played on timeout or AI failure. It must be legal; otherwise Continue is used. |
-| `turns.hide_bot_panel` | `true` | Hide a bot's move panel so it can't be clicked by accident. |
+| `turns.timeout_s.mcp` / `.ai` / `.decision` / `.tandem` | `0` / `120` / `120` / `180` | Seconds a bot-controlled turn may take (0 = wait forever). The turn waits for the bot: for chat-model bots (`ai`, `tandem`), 12 s before the limit the decision core takes over and plays its engine pick (the best move of the bot's last `look_ahead` this turn, else a quick one of its own), as a CPU opponent would. |
+| `turns.fallback_action` | `Continue` | Move played when no bot or engine pick could be had (an MCP chatbot's timeout, or the engine found nothing). It must be legal; otherwise Continue is used. |
+| `turns.hide_bot_panel` | `true` | Hide a bot's move panel (from the frame the game shows it, all turn long), so only the bot locks in its move. |
 | `turns.history_length` | `12` | Turns of history shown to bots. |
 | `simulation.enabled` / `.max_ticks` | `true` / `120` | Allow `simulate`, and how far it may look ahead. |
 | `simulation.reuse_previews` | `true` | Reset and reuse preview games instead of copying the match afresh each time (much faster). Only for the game's own characters: previews of characters from mods are always fresh copies. |
@@ -56,7 +56,7 @@ behind the **budok settings** button in the game's Options window, and in the F8
 | `max_tokens` | `16000` | `16000` | Output cap per request. |
 | `temperature` | `null` | `null` | OpenAI-compatible providers only. Anthropic's current API rejects sampling parameters. |
 | `request_timeout_s` | `180` | `300` | HTTP timeout. |
-| `max_steps` | `6` | `30` | Tool-use steps per turn or per batch. |
+| `max_steps` | `6` | `30` | Tool-use steps per turn or per batch. A playing model that used them all gets one more request that can only lock in its move; a request that failed for a reason that may pass (no connection, a timeout, the provider busy or rate limiting) is sent again, up to five times. Only then does the engine pick. |
 | `refusal_fallback` | `true` | `true` | On the Claude API, retry a declined request on a fallback model (`fallbacks: "default"`). |
 | `extra_body` | `{}` | `{}` | Merged into every request body (for example `reasoning_effort` for OpenAI reasoning models). |
 
@@ -214,6 +214,8 @@ budok 1.3.0 kept one decision model under `ai.decide`; it moves to `ai.core` by 
 | `schemas.auto.enabled` | `true` | Write missing character notes automatically (Characters tab → Automatic notes). |
 | `schemas.auto.use_agent` | `true` | A separate notes agent writes them, in its own context: budok starts Claude Code in the background (`claude -p`, with your Claude login, only budok's notes tools allowed, output in `user://budok/agent/agent.log`) and it exits when the queue is empty. A second chat running the `notes_worker` prompt counts as a notes agent too, and budok then starts none. |
 | `schemas.auto.agent_command` | `claude` | The Claude Code command or its full path. budok also looks in the usual install folders (`~/.local/bin`, npm's global folder, Homebrew), since a game started by Steam may not see your shell's `PATH`. Not changeable over MCP. |
+
+On Windows the notes agent starts hidden (through `wscript`, so no terminal window opens). If it stops or never connects, the notes status (Play tab, and `get_status`) shows the end of its log, `user://budok/agent/agent.log`: on Windows that is `%APPDATA%\YourOnlyMoveIsHUSTLE\budok\agent\agent.log`. Claude Code on Windows needs Git for Windows; if its log says it cannot find git-bash, set `CLAUDE_CODE_GIT_BASH_PATH`.
 | `schemas.auto.agent_model` | `""` | Model for the notes agent (`--model`); empty uses Claude Code's default. |
 | `schemas.auto.use_api` | `true` | The in-game AI writes them with your API key (settings `ai.annotate`), side by side with the notes agent. |
 | `schemas.auto.use_player` | `false` | Hand jobs to the chatbot that is playing, before its first move, but only when no notes agent is available. |

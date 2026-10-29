@@ -86,5 +86,5 @@ from the opponent, so a reversed lunge travels away from them.
 - With automatic notes on (the default), a match whose characters have no notes holds the bots' first
   move: `wait_for_turn` returns `status: "schema_task"` when the job is yours (write the notes, then call it
   again), or `status: "waiting", reason: "notes"` while the in-game AI writes them.
-- Timeouts (`turns.timeout_s.mcp`, default off) play `turns.fallback_action`.
+- Timeouts (`turns.timeout_s.mcp`, default off) play `turns.fallback_action`. In-game chat-model bots (`ai`, `tandem`) that run out of time play the decision core's engine pick instead (`engine_pick` in the match log).
 - If the human plays a bot's unclaimed slot from the UI, the turn closes as `resolved_elsewhere`.

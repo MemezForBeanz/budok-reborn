@@ -26,6 +26,7 @@ const ComboSolver = preload("res://budok/core/ComboSolver.gd")
 const Evidence = preload("res://budok/ai/Evidence.gd")
 const LookAheadReport = preload("res://budok/ai/LookAheadReport.gd")
 const Simulator = preload("res://budok/core/Simulator.gd")
+const AutoPilot = preload("res://budok/ai/AutoPilot.gd")
 
 var failures := 0
 var checks := 0
@@ -46,6 +47,7 @@ func _init() -> void:
 	_test_sim_turns()
 	_test_combo_helpers()
 	_test_previews()
+	_test_chat_fallbacks()
 	_test_talk_and_playbook()
 	print("%d checks, %d failures" % [checks, failures])
 	quit(failures)
@@ -614,3 +616,13 @@ func _test_previews() -> void:
 	check(under and simulator.over_budget(), "preview work shares one frame budget (12 ms by default)")
 	for node in [game.p1, game.p2, game, simulator]:
 		node.free()
+
+
+func _test_chat_fallbacks() -> void:
+	check(AutoPilot._transient({"status": 0}) and AutoPilot._transient({"status": 529}) and AutoPilot._transient({"status": 429})
+		and not AutoPilot._transient({"status": 400}) and not AutoPilot._transient({"status": 401}) and not AutoPilot._transient({"error": "no API key"}),
+		"a failed chat request is sent again only when it may work later (no connection, busy, rate limit)")
+	var slash = {"label": "Slash", "action": "Slash"}
+	var analysis = {"engine": {"best": "Slash"}, "candidates": [{"option": {"label": "Kick", "action": "Kick"}}, {"option": slash}]}
+	check(DecisionCore.pick_of(analysis) == slash and DecisionCore.pick_of({"candidates": []}) == null,
+		"the engine's pick is the analysis's best move, if any")

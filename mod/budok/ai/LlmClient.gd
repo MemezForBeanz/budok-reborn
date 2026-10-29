@@ -60,7 +60,7 @@ func chat(role: String, system: String, messages: Array, tools: Array) -> Dictio
 			break
 		yield(get_tree().create_timer(2.0 * pow(2, attempt)), "timeout")
 	if not response["ok"]:
-		return {"ok": false, "provider": provider, "error": response["error"]}
+		return {"ok": false, "provider": provider, "error": response["error"], "status": int(response.get("status", 0))}
 	return _parse_anthropic(response["json"]) if provider == "anthropic" else _parse_openai(response["json"])
 
 

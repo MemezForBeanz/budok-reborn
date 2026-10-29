@@ -9,9 +9,16 @@ extends Node
 # turns is the match history plus the model's own one-line notes.
 
 const Util = preload("res://budok/core/Util.gd")
+const Lookahead = preload("res://budok/core/Lookahead.gd")
 const Prompts = preload("res://budok/ai/Prompts.gd")
 const DecisionCore = preload("res://budok/ai/DecisionCore.gd")
 const CONTROLLERS := ["ai", "tandem"]
+# Waits before sending a request again that failed for a reason that may pass
+# (no connection, a timeout, the provider busy); the bot keeps the turn.
+const RETRY_WAITS := [3.0, 6.0, 12.0, 20.0, 30.0]
+# How long before the turn limit (turns.timeout_s) the decision core takes
+# over when the model has not locked in a move: its engine pick is played.
+const ENGINE_PICK_MS := 12000
 const REMEMBER_HELP := ("Save one lesson for future matches (kept in this game install and shown to every bot later). "
 	+ "about: opponent (their character), matchup (your character against theirs), self (your character) or general.")
 const SIMULATE_HELP := ("Preview one of your legal moves on the real engine against an assumed opponent move (omit opponent_action to assume they hold). "
@@ -27,8 +34,10 @@ const REMEMBER_TOOL := {
 
 var runtime = null
 var llm = null
-var stats := {"turns": 0, "fallbacks": 0, "input_tokens": 0, "output_tokens": 0, "last_error": "", "last_decision": ""}
+var stats := {"turns": 0, "fallbacks": 0, "engine_picks": 0, "input_tokens": 0, "output_tokens": 0, "last_error": "", "last_decision": ""}
 var _busy := {"p1": "", "p2": ""}
+# The turn whose move the engine is picking because the model gave none.
+var _ending := {"p1": "", "p2": ""}
 var _notes := {"p1": [], "p2": []}
 var _system_cache := {"p1": "", "p2": ""}
 
@@ -74,17 +83,77 @@ func _tools(slot: String) -> Array:
 			"who": {"type": "string", "enum": ["me", "opponent"]},
 			"moves": {"type": "array", "items": {"type": "string"}}}, "required": ["who", "moves"]},
 	})
+	tools.append(_submit_tool())
+	return tools
+
+
+# When the turn limit for this turn runs out (turns.timeout_s; 0 when none).
+func _deadline(token: String) -> int:
+	var turn = runtime.matches.turn_for_token(token)
+	if turn == null:
+		return 0
+	var timeout_s = float(runtime.config.get_value("turns.timeout_s." + str(runtime.matches.controllers.get(turn["slot"])), 0))
+	return turn["opened_ms"] + int(timeout_s * 1000.0) if timeout_s > 0 else 0
+
+
+# Coroutine: ENGINE_PICK_MS before the turn limit, the engine takes over a turn
+# the model has not locked in yet.
+func _watch(slot: String, token: String, deadline: int) -> void:
+	var wait_ms = deadline - ENGINE_PICK_MS - Util.now_ms()
+	yield(get_tree().create_timer(max(0.05, wait_ms / 1000.0)), "timeout")
+	if runtime.matches.turn_for_token(token) != null and _ending[slot] != token:
+		_play_engine_pick(slot, token, "out of time")
+
+
+# Coroutine: when the model gives no move (out of time, out of steps, or it
+# could not be reached), the decision core's engine pick is played, as a CPU
+# opponent would play it; the fallback move only when that finds nothing.
+func _play_engine_pick(slot: String, token: String, reason: String) -> void:
+	yield(get_tree(), "idle_frame")
+	var turn = runtime.matches.turn_for_token(token)
+	if turn == null or _ending[slot] == token:
+		return
+	_ending[slot] = token
+	stats["fallbacks"] += 1
+	var deadline = _deadline(token)
+	var limit = deadline - 2000 if deadline > 0 else Util.now_ms() + ENGINE_PICK_MS
+	var pick = yield(runtime.core.engine_pick(slot, turn, limit), "completed")
+	if runtime.matches.turn_for_token(token) == null:
+		return
+	if pick != null:
+		var result = runtime.matches.submit(token, pick["action"], pick["input"], Lookahead.extra_of(pick), "engine_pick")
+		if result.get("ok", false):
+			stats["engine_picks"] += 1
+			stats["last_decision"] = "%s t%d: %s (engine pick: %s)" % [slot, turn["tick"], pick["label"], reason]
+			push_warning("budok autopilot %s: no move from the model (%s), played the engine's pick %s" % [slot, reason, pick["label"]])
+			return
+	var fallback = str(runtime.config.get_value("turns.fallback_action", "Continue"))
+	push_warning("budok autopilot %s: no move from the model (%s) and no engine pick, playing %s" % [slot, reason, fallback])
+	if not runtime.matches.submit(token, fallback, null, {}, "ai_fallback").get("ok", false):
+		runtime.matches.submit(token, "Continue", null, {}, "ai_fallback")
+
+
+func _submit_tool() -> Dictionary:
 	var submit = {
 		"action": {"type": "string"}, "data": {}, "extra": {"type": "object"},
 		"note": {"type": "string", "description": "One short line on why (kept as memory for later turns)."}}
 	if runtime.speech.enabled():
 		submit["say"] = {"type": "string", "description": "A line shown in a speech bubble above your character (under 80 characters)."}
-	tools.append({
+	return {
 		"name": "submit_action",
 		"description": "Lock in your move for this turn. Required exactly once.",
 		"parameters": {"type": "object", "properties": submit, "required": ["action"]},
-	})
-	return tools
+	}
+
+
+# Whether a failed request may work when sent again: no connection or a
+# timeout, the provider busy or rate-limiting. A bad key or request, or a
+# missing setting, will not.
+static func _transient(reply: Dictionary) -> bool:
+	if not reply.has("status"):
+		return false
+	var status = int(reply["status"])
+	return status == 0 or status in [408, 409, 425, 429] or status >= 500
 
 
 func _take_turn(slot: String, token: String) -> void:
@@ -105,14 +174,34 @@ func _take_turn(slot: String, token: String) -> void:
 	var tools = _tools(slot)
 	var simulations = 0
 	var submitted = false
-	for _step in range(max_steps):
-		if runtime.matches.turn_for_token(token) == null:
-			break
+	var steps = 0
+	var retries = 0
+	var last_call = false
+	var gave_up = ""
+	var deadline = _deadline(token)
+	if deadline > 0:
+		_watch(slot, token, deadline)
+	# The model decides the move: the turn waits for it, and a failed request is
+	# sent again. Out of steps, it gets one more request that can only lock in.
+	while runtime.matches.turn_for_token(token) != null and _ending[slot] != token:
+		if steps >= max_steps:
+			if last_call:
+				gave_up = "no move after %d steps" % steps
+				break
+			last_call = true
+			messages.append(llm.user_message("You have used every step for this turn. Call submit_action now with your best move."))
+			tools = [_submit_tool()]
 		var reply = yield(llm.chat("play", _system_cache[slot], messages, tools), "completed")
 		if not reply.get("ok", false):
 			stats["last_error"] = str(reply.get("error", "unknown error"))
 			push_warning("budok autopilot %s: %s" % [slot, stats["last_error"]])
+			if _transient(reply) and retries < RETRY_WAITS.size():
+				yield(get_tree().create_timer(RETRY_WAITS[retries]), "timeout")
+				retries += 1
+				continue
+			gave_up = stats["last_error"]
 			break
+		steps += 1
 		_count_usage(reply.get("usage", {}))
 		messages.append(reply["assistant"])
 		if reply["tool_calls"].empty():
@@ -153,12 +242,8 @@ func _take_turn(slot: String, token: String) -> void:
 		if submitted:
 			break
 		messages += llm.tool_results("play", results)
-	if not submitted and runtime.matches.turn_for_token(token) != null:
-		stats["fallbacks"] += 1
-		var fallback = str(runtime.config.get_value("turns.fallback_action", "Continue"))
-		var result = runtime.matches.submit(token, fallback, null, {}, "ai_fallback")
-		if not result.get("ok", false):
-			runtime.matches.submit(token, "Continue", null, {}, "ai_fallback")
+	if not submitted and runtime.matches.turn_for_token(token) != null and _ending[slot] != token:
+		yield(_play_engine_pick(slot, token, gave_up), "completed")
 	stats["turns"] += 1
 	if _busy[slot] == token:
 		_busy[slot] = ""
