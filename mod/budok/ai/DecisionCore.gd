@@ -9,7 +9,13 @@ extends Node
 # mode a chat model (in the game or over MCP) calls look_ahead() to explore
 # futures and decides itself, without spending its own context on them.
 #
-# analyze() for one turn:
+# analyze() for one turn. On a combo turn (one fighter can act, the other can
+# only DI, burst or wait out a move) the combo solver (core/ComboSolver.gd)
+# searches the attacker's routes on the engine and decides, without models:
+# attacking, the route that keeps the most damage against every DI; being
+# hit, the DI or burst that holds the attacker's best routes lowest. The route
+# is remembered and checked against what really happened on the next turn.
+# Any other turn:
 #   1. unless the caller named them, one request ranks your moves and guesses
 #      the opponent's move (two questions, one request); your defensive moves
 #      (blocks, dodges) join the candidates;
@@ -17,27 +23,38 @@ extends Node
 #      reply the opponent has (each move and its aim, strength and direction
 #      variants) up to the next decision point, likeliest replies first. No
 #      model is needed for this, so it works without one when moves are named;
-#   3. deep lines (one per parallel request the core has) start from the best
-#      candidates against their likeliest and their worst reply, and keep
-#      playing for `depth` turns, the models choosing both fighters' moves;
-#   4. optionally, a last request ranks the candidates, each described with
-#      what the engine showed (average, worst case, likeliest replies, lines).
+#   3. deep lines (one per parallel request the core has) start from the
+#      candidates against the likeliest reply (each candidate once, best
+#      first), then against their worst, and keep playing for `depth` turns,
+#      the models choosing both fighters' moves. A candidate's score is its
+#      next-exchange average plus the follow-up: what lines gained or lost
+#      after their first exchange, measured or estimated (see _add_lines);
+#   4. the engine's pick is the best score among moves whose worst case is not
+#      a KO against you; a last request lets the models choose among the moves
+#      close to it (CLOSE_MARGIN), the judgement calls, and only those.
 
 const Util = preload("res://budok/core/Util.gd")
 const Observation = preload("res://budok/core/Observation.gd")
 const SimTurns = preload("res://budok/core/SimTurns.gd")
 const PayloadSpec = preload("res://budok/core/PayloadSpec.gd")
 const Lookahead = preload("res://budok/core/Lookahead.gd")
+const ComboSolver = preload("res://budok/core/ComboSolver.gd")
+const Evidence = preload("res://budok/ai/Evidence.gd")
+const LookAheadReport = preload("res://budok/ai/LookAheadReport.gd")
 const PROVIDERS := ["typesafe", "vercel"]
 const MINUTE_MS := 60000
 const MAX_DEPTH := 30
 const MAX_THREADS := 32
 const MAX_MOVES := 8
-const KO_VALUE := 1000
 const NOTE_CHARS := 140
-# Defensive moves added to the candidates, and line steps shown per line.
+# Defensive moves added to the candidates.
 const MAX_DEFENSES := 4
-const STEPS_SHOWN := 6
+# How far (summed over both fighters, in game units) the live position may be
+# from a remembered route's prediction and still count as on the route.
+const ROUTE_SLACK := 24
+# What spending a burst (or another way out of a combo) costs when the bot
+# weighs bursting against DI.
+const ESCAPE_COST := 120.0
 # Options below this share of the likeliest one are never drawn.
 const SAMPLE_FLOOR := 0.1
 # How long an endpoint sits out after an error: a rejected key (401/403), else.
@@ -46,8 +63,11 @@ const ERROR_PAUSE_MS := 10000
 const LOOK_AHEAD_HELP := ("Play this turn ahead on the real game engine. First it plays each of your candidate moves against EVERY legal "
 	+ "opponent reply (each move and its aim, strength and direction variants) up to the next decision point, and reports per move the average "
 	+ "(weighted by how likely each reply is), the worst case with the reply that causes it, and the likeliest and most dangerous replies. Your "
-	+ "defensive moves (block, low block, dodges) are added unless defenses is false. Then, with a decision model set up, it plays the best moves "
-	+ "several turns deeper with the models choosing both fighters' moves. Every move and line step comes as action, data and extra exactly as "
+	+ "defensive moves (block, low block, dodges) are added unless defenses is false. Then, with a decision model set up, it plays every move "
+	+ "several turns deeper with the models choosing both fighters' moves; score is the next exchange plus that follow-up, and recommended is the "
+	+ "engine's pick (close_calls are judgement calls). On a combo turn (one fighter can only DI, burst or wait) a combo solver searches the "
+	+ "attacker's routes instead, no model needed, and reports the route that keeps the most damage against every DI (combo.best_route, or "
+	+ "their_best_route and the DI or burst to pick when you are being hit). Every move and step comes as action, data and extra exactly as "
 	+ "submit_action takes them; start shows the position the runs start from. Name your candidates in moves (or omit them and the decision "
 	+ "core picks its top ones). It never reveals the opponent's real choice. You still decide: call submit_action afterwards.")
 
@@ -60,6 +80,8 @@ var _rng := RandomNumberGenerator.new()
 var _state := {}
 var _limit_regex := RegEx.new()
 var _retry_regex := RegEx.new()
+# Per slot, the combo route its last combo turn chose (see _remember_route).
+var _routes := {}
 
 
 func setup(runtime_ref, llm_ref) -> void:
@@ -284,12 +306,16 @@ static func depth_for_rate(depth: int, lines: int, rpm: int, think_ms: int, cons
 # Coroutine. request: {"candidates"?: [option], "replies"?: [option], "depth"?,
 # "lines"?, "focus"?, "opponent_style"?, "defenses"? (add your defensive
 # moves; default true), "rank": bool, "think_ms"?, "limit" (absolute ms the
-# whole analysis must end by)}. Returns {"ok", "candidates": [entry (see
-# facts) + "lines", "prior"?, "added"?, "text"], "replies": [{"option", "p"}],
-# "replies_named", "ranking": {label: p}, "depth", "lines_planned",
+# whole analysis must end by), "combo"? (search combo turns with the combo
+# solver; default true), "combo_goal"? (ComboSolver.GOALS)}. Returns {"ok",
+# "situation": open, attacking or defending, "candidates": [entry (see facts)
+# + "lines", "followup", "prior"?, "added"?, "text"], "replies": [{"option",
+# "p"}], "replies_named", "ranking": {label: p} (what to draw the move from),
+# "engine": {"best", "close", "unsafe"} (labels), "depth", "lines_planned",
 # "lines_played", "start" (the live match where every run starts), "sweep":
-# {"pairs", "played", "check"}, "notes": [text]} or {"ok": false, "error"}.
-# The previews it used are freed when it ends.
+# {"pairs", "played", "check"}, "notes": [text], and on combo turns "combo"
+# (ComboSolver.solve's result) and "route" (how the last route went)} or
+# {"ok": false, "error"}. The previews it used are freed when it ends.
 func analyze(slot: String, turn: Dictionary, request: Dictionary) -> Dictionary:
 	var result = yield(_analyze(slot, turn, request), "completed")
 	runtime.simulator.release_pool()
@@ -306,6 +332,11 @@ func _analyze(slot: String, turn: Dictionary, request: Dictionary) -> Dictionary
 	var ctx = runtime.lookahead.context(slot, turn, cfg["max_options"])
 	ctx["focus"] = str(request.get("focus", ""))
 	ctx["opponent_style"] = str(request.get("opponent_style", ""))
+	var simulating = bool(runtime.config.get_value("simulation.enabled", true)) and Util.as_int(request.get("depth", cfg["depth"])) != 0
+	var where = runtime.lookahead.situation(ctx)
+	if where["kind"] == "combo" and simulating and bool(request.get("combo", true)):
+		return yield(_analyze_combo(slot, ctx, where, request, deadline), "completed")
+	_routes.erase(slot)
 	var names = _names(ctx)
 	var notes = []
 	var candidates = request.get("candidates", []).duplicate()
@@ -346,16 +377,19 @@ func _analyze(slot: String, turn: Dictionary, request: Dictionary) -> Dictionary
 	var depth = int(clamp(Util.as_int(request.get("depth", cfg["depth"])), 0, MAX_DEPTH))
 	if not bool(runtime.config.get_value("simulation.enabled", true)):
 		depth = 0
-	var result = {"ok": true, "depth": depth, "replies": [], "replies_named": not named_replies.empty(), "ranking": {}, "lines_planned": 0,
-		"lines_played": 0, "notes": notes, "start": runtime.lookahead.root_state(ctx), "sweep": {"pairs": 0, "played": 0, "check": {}}}
+	var result = {"ok": true, "situation": "open", "depth": depth, "replies": [], "replies_named": not named_replies.empty(), "ranking": {},
+		"engine": {}, "lines_planned": 0, "lines_played": 0, "notes": notes, "start": runtime.lookahead.root_state(ctx),
+		"sweep": {"pairs": 0, "played": 0, "check": {}}}
 	for i in range(replies.size()):
 		result["replies"].append({"option": replies[i], "p": weights[i]})
 	if depth == 0:
 		result["candidates"] = []
 		for candidate in candidates:
 			result["candidates"].append({"option": candidate, "prior": my_p.get(candidate["label"]), "replies": [], "lines": [], "tested": 0,
-				"average": 0.0, "worst": {}, "best": {}, "text": candidate["description"], "score": 0.0})
+				"average": 0.0, "worst": {}, "best": {}, "text": candidate["description"], "score": 0.0, "followup": 0.0})
 		result["ranking"] = my_p
+		if not my_p.empty():
+			result["ranking_by"] = "decision models"
 		return result
 	var deep = int(clamp(Util.as_int(request.get("lines", capacity())), 0, MAX_THREADS)) if model and depth > 1 else 0
 	if depth > 1 and not model:
@@ -395,21 +429,241 @@ func _analyze(slot: String, turn: Dictionary, request: Dictionary) -> Dictionary
 		_add_lines(result, lines, results)
 	stats["lines"] += result["lines_played"]
 	for entry in result["candidates"]:
-		entry["text"] = _evidence(entry, replies)
-	if rank:
+		entry["text"] = Evidence.evidence(entry, replies)
+	# The engine decides; the models only choose among the moves close to its pick.
+	var pick = Evidence.engine_pick(result["candidates"])
+	result["engine"] = Evidence.engine_labels(result["candidates"], pick)
+	var close = pick.get("close", [])
+	if rank and close.size() > 1:
 		var options = {}
-		for entry in result["candidates"]:
-			options[entry["option"]["label"]] = entry["text"]
+		for i in close:
+			options[result["candidates"][i]["option"]["label"]] = result["candidates"][i]["text"]
 		var final = yield(ask(state + "\nbudok played your candidate moves on the real game engine; each option says what happened.", {"move": {
-			"instructions": ("Lock in one move for this turn. Damage you deal minus damage you take matters most; a KO for you is best and a KO "
-				+ "against you is worst. Each move was played against every reply the opponent has; their likeliest replies are guesses, "
-				+ "so a move whose worst case is a heavy loss is risky even when its average is good.%s") % _focus_text(ctx),
+			"instructions": ("Lock in one move for this turn. These moves came out close on the engine (score: damage you deal minus damage you "
+				+ "take, a KO counting 1000, over the next exchange plus what followed), so this is a judgement call: mix up and read the "
+				+ "opponent. Their likeliest replies are guesses; a move whose worst case is a heavy loss is risky even when its average is "
+				+ "good.%s") % _focus_text(ctx),
 			"options": options}}, deadline), "completed")
 		if final["ok"]:
 			result["ranking"] = final["answers"]["move"]["probabilities"]
+			result["ranking_by"] = "decision models"
 		else:
 			result["ranking_error"] = final["error"]
+	if result["ranking"].empty() and pick.has("best"):
+		result["ranking"] = {result["candidates"][pick["best"]]["option"]["label"]: 1.0}
 	return result
+
+
+# --- combo turns ---
+
+# Coroutine: analyze() on a combo turn (where: Lookahead.situation's). The
+# solver searches the attacker's routes; attacking, the candidates are its
+# first moves, each judged by its route against every DI policy (the
+# "replies"); defending, they are your DI and escape options, each judged by
+# the attacker's best routes against it. The best is chosen outright: there
+# is nothing to guess about here that the engine cannot play out.
+func _analyze_combo(slot: String, ctx: Dictionary, where: Dictionary, request: Dictionary, deadline: int) -> Dictionary:
+	yield(get_tree(), "idle_frame")
+	var attacking = where["attacker"] == slot
+	var notes = []
+	var seeds = []
+	var route = {}
+	if attacking:
+		seeds = request.get("candidates", []).duplicate()
+		route = _route_check(slot, ctx)
+		if route.has("seed") and ComboSolver._find(seeds, route["seed"]) == null:
+			seeds.append(route["seed"])
+	elif not request.get("candidates", []).empty():
+		notes.append("you are being hit: every DI and escape you have is compared, not only the moves named")
+	if not request.get("replies", []).empty():
+		notes.append("opponent_moves is not used on a combo turn: the solver plays the %s's every move" % ("defender" if attacking else "attacker"))
+	var solver = ComboSolver.new(runtime)
+	var goal = str(request.get("combo_goal", "damage"))
+	var solved = yield(solver.solve(ctx, where["attacker"], deadline, {"goal": goal, "seeds": seeds}), "completed")
+	if runtime.matches.turn_for_token(ctx["token"]) == null:
+		return {"ok": false, "error": "the turn ended while thinking"}
+	if not solved["ok"]:
+		return {"ok": false, "error": solved["error"]}
+	var result = {"ok": true, "situation": "attacking" if attacking else "defending", "combo": solved, "depth": 0, "replies": [],
+		"replies_named": false, "ranking": {}, "engine": {}, "lines_planned": 0, "lines_played": 0, "notes": notes,
+		"start": runtime.lookahead.root_state(ctx), "sweep": {"pairs": 0, "played": 0, "check": {}}}
+	if attacking:
+		_combo_attack(result, solved)
+		route = _route_outcome(route, solved)
+		_remember_route(slot, ctx, solved)
+		result["route"] = route
+	else:
+		_combo_defend(result, solved, runtime.lookahead.live_options(ctx, slot))
+	var pick = Evidence.engine_pick(result["candidates"])
+	result["engine"] = Evidence.engine_labels(result["candidates"], pick)
+	if pick.has("best"):
+		result["ranking"] = {result["candidates"][pick["best"]]["option"]["label"]: 1.0}
+	var replies = []
+	for reply in result["replies"]:
+		replies.append(reply["option"])
+	for entry in result["candidates"]:
+		entry["text"] = Evidence.evidence(entry, replies)
+	return result
+
+
+# Attacking: one candidate per route the solver found, its replies the DI
+# policies (each with the route's result against it), scored by the solver's
+# own ranking (the worst policy, CONTINUE_BONUS while a combo is still going).
+func _combo_attack(result: Dictionary, solved: Dictionary) -> void:
+	var policies = solved["policy_options"]
+	for option in policies:
+		result["replies"].append({"option": option, "p": 1.0 / policies.size()})
+	result["candidates"] = []
+	for plan in solved["plans"]:
+		var items = []
+		for branch in plan["branches"]:
+			var index = solved["policies"].find(branch["policy"]["label"])
+			var outcome = branch["result"]["steps"].back()
+			items.append({"index": index, "p": 1.0 / policies.size(), "value": Evidence.value(outcome), "outcome": outcome})
+		var entry = _entry(plan["first"], items)
+		entry["score"] = plan["value"]
+		entry["played"] = plan["route"]["result"]["steps"][0]
+		entry["plan"] = plan
+		result["candidates"].append(entry)
+
+
+# Defending: your options at this point (DI each way, bursts and other
+# escapes), each against the attacker's routes. A DI's result is the
+# attacker's route played against that DI held for the whole combo (routes
+# checked against every DI; when none could be, only no DI has results); an
+# escape's is the attacker's first move against it, minus ESCAPE_COST for
+# what it spends. Scored by the worst result: the attacker picks the route.
+func _combo_defend(result: Dictionary, solved: Dictionary, mine: Array) -> void:
+	var plans = []
+	for plan in solved["plans"]:
+		if plan["validated"]:
+			plans.append(plan)
+	if plans.empty():
+		plans = solved["plans"]
+		result["notes"].append("no route could be checked against every DI in time: only no DI has results")
+	for plan in plans:
+		result["replies"].append({"option": plan["first"], "p": 1.0 / plans.size()})
+	result["candidates"] = []
+	for option in mine:
+		var items = []
+		for r in range(plans.size()):
+			var outcome = null
+			if option["action"] == "Continue":
+				for branch in plans[r]["branches"]:
+					if branch["policy"]["option"]["label"] == option["label"]:
+						outcome = branch["result"]["steps"].back()
+			else:
+				for escape in plans[r]["escapes"]:
+					if escape["step"] == 1 and escape["option"]["label"] == option["label"]:
+						outcome = escape["result"]["steps"].back()
+			if outcome != null:
+				items.append({"index": r, "p": 1.0 / plans.size(), "value": Evidence.value(outcome) - (ESCAPE_COST if option["action"] != "Continue" else 0.0),
+					"outcome": outcome})
+		var entry = _entry(option, items)
+		entry["score"] = entry["worst"]["value"] if not entry["worst"].empty() else -INF
+		result["candidates"].append(entry)
+
+
+# A candidate entry (as facts makes them) from its reply items.
+static func _entry(option: Dictionary, items: Array) -> Dictionary:
+	var entry = {"option": option, "replies": items, "lines": [], "tested": items.size(), "average": 0.0, "worst": {}, "best": {}, "score": 0.0,
+		"followup": 0.0}
+	var weight = 0.0
+	for item in items:
+		entry["average"] += item["p"] * item["value"]
+		weight += item["p"]
+		if entry["worst"].empty() or item["value"] < entry["worst"]["value"]:
+			entry["worst"] = item
+		if entry["best"].empty() or item["value"] > entry["best"]["value"]:
+			entry["best"] = item
+	entry["average"] = entry["average"] / weight if weight > 0.0 else 0.0
+	return entry
+
+
+# The route the last combo turn of `slot` chose, checked against the live
+# position: {} when there is none; else {"status": on_route (the position is
+# one the route predicted, against some DI), off_route or done (the route had
+# no more moves), "step"?, "of"?, "di"?, "drift"? (how far off the prediction
+# the fighters are), "seed"? (the route's next move, which the solver will
+# search whatever its first screen says), "planned"? (its label)}.
+func _route_check(slot: String, ctx: Dictionary) -> Dictionary:
+	var memo = _routes.get(slot)
+	var game = runtime.matches.game
+	if memo == null or memo["game"] != game.get_instance_id() or memo["tick"] >= ctx["tick"]:
+		return {}
+	var live = {}
+	for side in [ctx["slot"], ctx["other"]]:
+		live[side] = Lookahead.fighter_view(game, side)
+	var best = {}
+	for branch in memo["predicted"]:
+		for k in range(branch["views"].size()):
+			var drift = _drift(branch["views"][k], live)
+			if drift >= 0 and (best.empty() or drift < best["drift"]):
+				best = {"drift": drift, "di": branch["policy"], "k": k}
+	if best.empty() or best["drift"] > ROUTE_SLACK:
+		return {"status": "off_route", "planned": memo["moves"][1]["label"] if memo["moves"].size() > 1 else ""}
+	var next = best["k"] + 1
+	var out = {"status": "on_route", "step": next + 1, "of": memo["moves"].size(), "di": best["di"], "drift": best["drift"]}
+	if next >= memo["moves"].size():
+		out["status"] = "done"
+		return out
+	out["planned"] = memo["moves"][next]["label"]
+	for option in runtime.lookahead.live_options(ctx, slot):
+		if Util.json_str(Lookahead._move_key(option)) == Util.json_str(Lookahead._move_key(memo["moves"][next])):
+			out["seed"] = option
+	if not out.has("seed"):
+		out["status"] = "off_route"
+		out["why"] = "%s is not possible here" % out["planned"]
+	return out
+
+
+# How far a predicted position is from the live one: -1 when hp or states
+# differ, else the positions' distance summed over both fighters.
+static func _drift(predicted: Dictionary, live: Dictionary) -> int:
+	var total = 0
+	for side in live:
+		var a = predicted.get(side, {})
+		var b = live[side]
+		if a.get("hp") != b["hp"] or a.get("state") != b["state"]:
+			return -1
+		total += int(abs(a["position"]["x"] - b["position"]["x"]) + abs(a["position"]["y"] - b["position"]["y"]))
+	return total
+
+
+# What came of the remembered route this turn, for the report.
+static func _route_outcome(route: Dictionary, solved: Dictionary) -> Dictionary:
+	if route.empty():
+		return {"status": "new", "detail": "no route was being followed"}
+	var out = route.duplicate()
+	var seed_option = out.get("seed")
+	out.erase("seed")
+	var chosen = solved["plans"][0]["first"]["label"]
+	match route["status"]:
+		"on_route":
+			out["detail"] = ("the position is the one the route predicted (against %s, %d units off); its next move %s is still the best"
+				% [route["di"], route["drift"], chosen]) if seed_option != null and chosen == seed_option["label"] else (
+				"the position is the one the route predicted, but searching again from here found %s better than the planned %s" % [chosen, route["planned"]])
+		"done":
+			out["detail"] = "the route had no more moves: searched again from here"
+		_:
+			out["detail"] = "the position is not one the route predicted (DI, a burst or a collision changed it): searched again from here"
+	return out
+
+
+# Keeps the best route of an attacking turn for the next one: its moves and
+# the position it predicted after each step against each DI policy.
+func _remember_route(slot: String, ctx: Dictionary, solved: Dictionary) -> void:
+	var plan = solved["plans"][0]
+	var moves = []
+	for step in plan["route"]["path"]:
+		moves.append(step[solved["attacker"]])
+	var predicted = []
+	for branch in plan["branches"]:
+		var views = []
+		for step in branch["result"]["steps"]:
+			views.append(step["fighters"])
+		predicted.append({"policy": branch["policy"]["label"], "views": views})
+	_routes[slot] = {"game": runtime.matches.game.get_instance_id(), "tick": ctx["tick"], "moves": moves, "predicted": predicted}
 
 
 # Turns played with a decision model at the same time (they share the core).
@@ -474,39 +728,29 @@ static func reply_weights(replies: Array, move_p: Dictionary, uniform: bool) -> 
 # time runs out, every candidate has met the same replies.
 static func sweep_order(candidate_count: int, weights: Array) -> Array:
 	var order = []
-	for r in _ranked(weights):
+	for r in Evidence.ranked(weights):
 		for c in range(candidate_count):
 			order.append([c, r])
 	return order
 
 
-# Indices of `values`, largest first (ties keep their order).
-static func _ranked(values: Array) -> Array:
-	var out = []
-	for i in range(values.size()):
-		var at = out.size()
-		while at > 0 and values[out[at - 1]] < values[i]:
-			at -= 1
-		out.insert(at, i)
-	return out
-
-
 # Per candidate, what the sweep showed: {"option", "replies": [{"index", "p",
 # "value", "outcome"}] (each reply played), "tested", "average" (weighted by
 # how likely each reply is), "worst" and "best" (one of the replies, {} when
-# none was played), "score", "lines": []}. value: damage dealt minus taken,
-# a KO counting KO_VALUE.
+# none was played), "score" (the average until _add_lines adds the
+# follow-up), "followup", "lines": []}. value: damage dealt minus taken, a KO
+# counting KO_VALUE.
 static func facts(candidates: Array, replies: Array, weights: Array, results: Array) -> Array:
 	var out = []
 	for c in range(candidates.size()):
-		var entry = {"option": candidates[c], "replies": [], "lines": [], "tested": 0, "average": 0.0, "worst": {}, "best": {}}
+		var entry = {"option": candidates[c], "replies": [], "lines": [], "tested": 0, "average": 0.0, "worst": {}, "best": {}, "followup": 0.0}
 		var weighted = 0.0
 		var weight = 0.0
 		for r in range(replies.size()):
 			var outcome = results[c][r] if c < results.size() else null
 			if outcome == null:
 				continue
-			var item = {"index": r, "p": weights[r], "value": _value(outcome), "outcome": outcome}
+			var item = {"index": r, "p": weights[r], "value": Evidence.value(outcome), "outcome": outcome}
 			entry["replies"].append(item)
 			weighted += weights[r] * item["value"]
 			weight += weights[r]
@@ -521,22 +765,29 @@ static func facts(candidates: Array, replies: Array, weights: Array, results: Ar
 	return out
 
 
-# Deep lines for the candidates that did best in the sweep, each against the
-# reply it is likeliest to meet and the one that hurt it most. With more lines
-# than such pairs, the best pairs get another (lines differ: the models' picks
-# are drawn from their probabilities).
+# Deep lines for the candidates the sweep played, best first: first each one
+# against the likeliest reply, so they all get the same kind of evidence,
+# then each against the reply that hurt it most. With more lines than such
+# pairs, the pairs get another in turn (lines differ: the models' picks are
+# drawn from their probabilities).
 static func deep_plan(entries: Array, replies: Array, weights: Array, count: int, depth: int) -> Array:
 	var scores = []
 	for entry in entries:
 		scores.append(entry["score"])
-	var likely = _ranked(weights)[0] if not weights.empty() else -1
+	var likely = Evidence.ranked(weights)[0] if not weights.empty() else -1
+	var order = []
+	for c in Evidence.ranked(scores):
+		if entries[c]["tested"] > 0:
+			order.append(c)
 	var pairs = []
-	var seen = {}
-	for c in _ranked(scores):
-		for r in [likely, entries[c]["worst"].get("index", -1)]:
-			if r >= 0 and not seen.has("%d/%d" % [c, r]):
-				seen["%d/%d" % [c, r]] = true
-				pairs.append([c, r])
+	for c in order:
+		for item in entries[c]["replies"]:
+			if item["index"] == likely:
+				pairs.append([c, likely])
+	for c in order:
+		var worst = entries[c]["worst"].get("index", -1)
+		if worst >= 0 and worst != likely:
+			pairs.append([c, worst])
 	var lines = []
 	for t in range(count if not pairs.empty() else 0):
 		var pair = pairs[t % pairs.size()]
@@ -544,12 +795,21 @@ static func deep_plan(entries: Array, replies: Array, weights: Array, count: int
 	return lines
 
 
-# Deep lines into their candidates' entries; their average value joins the
-# score, and lines that never ran are explained.
+# Deep lines into their candidates' entries, and each candidate's score: the
+# next-exchange average plus the follow-up, what happened after the first
+# exchange (a line's result minus its first exchange's, which the average
+# already counts). A reply with finished lines of its own takes their mean
+# follow-up; one without takes the mean of the finished lines whose first
+# exchange left the same kind of position (you act first, even, they act
+# first), so every candidate is scored the same way; with neither, 0. Lines
+# cut short or stopped mid-combo are shown but not counted. Notes say which
+# lines never ran.
 func _add_lines(result: Dictionary, lines: Array, results: Array) -> void:
 	result["lines_planned"] = lines.size()
 	var not_started = 0
 	var failed = []
+	var own = {}
+	var by_kind = {}
 	for i in range(lines.size()):
 		var line = results[i]
 		if line == null:
@@ -558,21 +818,50 @@ func _add_lines(result: Dictionary, lines: Array, results: Array) -> void:
 			failed.append(str(line.get("error", "")))
 		else:
 			result["lines_played"] += 1
+			var followup = Evidence.value(line) - Evidence.value(line["first"])
 			var view = {"reply": lines[i]["reply"], "turns": line["turns"], "dealt": line["dealt"], "taken": line["taken"], "ko": line["ko"],
-				"stop": line["stop"], "steps": line["steps"]}
+				"stop": line["stop"], "steps": line["steps"], "followup": followup, "unresolved": line["unresolved"]}
 			if line.has("stop_detail"):
 				view["stop_detail"] = line["stop_detail"]
 			result["candidates"][lines[i]["candidate"]]["lines"].append(view)
+			if not line["unresolved"]:
+				_tally(own, "%d/%d" % [lines[i]["candidate"], lines[i]["reply"]], followup)
+				_tally(by_kind, _kind(line["first"]), followup)
 	if not_started > 0:
 		result["notes"].append("%d of %d deep lines did not start: out of thinking time (ai.core.think_s)" % [not_started, lines.size()])
 	if not failed.empty():
 		result["notes"].append("%d deep lines failed: %s" % [failed.size(), failed[0]])
-	for entry in result["candidates"]:
-		if not entry["lines"].empty():
-			var total = 0.0
-			for line in entry["lines"]:
-				total += _value(line)
-			entry["score"] += total / entry["lines"].size()
+	for c in range(result["candidates"].size()):
+		var entry = result["candidates"][c]
+		var total = 0.0
+		var weight = 0.0
+		var measured = 0
+		var estimated = 0
+		for item in entry["replies"]:
+			var key = "%d/%d" % [c, item["index"]]
+			var kind = _kind(item["outcome"])
+			var followup = 0.0
+			if own.has(key):
+				followup = own[key][0] / own[key][1]
+				measured += 1
+			elif kind != "ko" and by_kind.has(kind):
+				followup = by_kind[kind][0] / by_kind[kind][1]
+				estimated += 1
+			total += item["p"] * followup
+			weight += item["p"]
+		entry["followup"] = total / weight if weight > 0.0 else 0.0
+		entry["followup_from"] = {"measured": measured, "estimated": estimated}
+		entry["score"] = entry["average"] + entry["followup"]
+
+
+static func _tally(sums: Dictionary, key: String, value: float) -> void:
+	var known = sums.get(key, [0.0, 0])
+	sums[key] = [known[0] + value, known[1] + 1]
+
+
+# The kind of position an exchange left: ko, or who acts first.
+static func _kind(outcome: Dictionary) -> String:
+	return "ko" if outcome["ko"] != "" else str(outcome.get("next_turn", outcome.get("stop", "")))
 
 
 # Coroutine: runs `lines`, as many at once as the core has parallel requests.
@@ -667,65 +956,6 @@ func _move_criteria(options: Array, ctx: Dictionary, side: String) -> Dictionary
 	return _criteria(firsts, ctx, side)
 
 
-# What the engine showed for one candidate, as text for the ranking request.
-static func _evidence(entry: Dictionary, replies: Array) -> String:
-	var parts = [entry["option"]["description"]]
-	if entry["tested"] == 0:
-		parts.append("not simulated (out of time)")
-		return PoolStringArray(parts).join(". ")
-	parts.append("against %d replies: average %+d (damage dealt minus taken)" % [entry["tested"], int(round(entry["average"]))])
-	parts.append("worst " + _reply_text(entry["worst"], replies))
-	var likely = _likely(entry, 3)
-	var texts = []
-	for item in likely:
-		texts.append(_reply_text(item, replies))
-	parts.append("likeliest: " + PoolStringArray(texts).join("; "))
-	for line in entry["lines"]:
-		parts.append("played %d turns vs %s: you dealt %d, took %d%s" % [line["turns"], replies[line["reply"]]["label"], line["dealt"], line["taken"], _ko_text(line["ko"])])
-	return PoolStringArray(parts).join(". ")
-
-
-# The n likeliest replies an entry was played against.
-static func _likely(entry: Dictionary, n: int) -> Array:
-	var ps = []
-	for item in entry["replies"]:
-		ps.append(item["p"])
-	var out = []
-	for i in _ranked(ps).slice(0, n - 1) if not ps.empty() else []:
-		out.append(entry["replies"][i])
-	return out
-
-
-# "vs Grab (5%): take 120, they act first"
-static func _reply_text(item: Dictionary, replies: Array) -> String:
-	return "vs %s (%s): %s" % [replies[item["index"]]["label"], _percent(item["p"]), _result_text(item["outcome"])]
-
-
-static func _result_text(outcome: Dictionary) -> String:
-	var parts = []
-	if outcome["dealt"] != 0 or outcome["taken"] == 0:
-		parts.append("deal %d" % outcome["dealt"])
-	if outcome["taken"] != 0 or outcome["dealt"] == 0:
-		parts.append("take %d" % outcome["taken"])
-	if outcome.get("next_turn", "") != "":
-		parts.append(outcome["next_turn"])
-	elif outcome.get("stop", "") == "stuck":
-		parts.append("no decision point within the tick limit")
-	return PoolStringArray(parts).join(", ") + _ko_text(outcome["ko"])
-
-
-static func _percent(p: float) -> String:
-	return "%d%%" % int(round(p * 100)) if p >= 0.005 else "<1%"
-
-
-static func _value(outcome: Dictionary) -> float:
-	return float(outcome["dealt"] - outcome["taken"]) + (KO_VALUE if outcome["ko"] == "opponent" else (-KO_VALUE if outcome["ko"] == "you" else 0))
-
-
-static func _ko_text(ko: String) -> String:
-	return " - KO for you" if ko == "opponent" else (" - you are KO'd" if ko == "you" else "")
-
-
 # The n likeliest options, likeliest first.
 static func _top(options: Array, probabilities: Dictionary, n: int) -> Array:
 	var rest = options.duplicate()
@@ -776,6 +1006,10 @@ static func look_ahead_properties() -> Dictionary:
 		"focus": {"type": "string", "description": "Your plan, used when the core picks your moves inside the lines (e.g. \"go for a corner combo\", \"play safe, I am ahead\")."},
 		"opponent_style": {"type": "string", "description": "How the opponent plays, used when the core picks their moves (e.g. \"aggressive, grabs a lot\")."},
 		"detail": {"type": "string", "enum": ["summary", "full"], "description": "full: every reply's result for every move and every step of the deep lines (long)."},
+		"combo_goal": {"type": "string", "enum": ComboSolver.GOALS, "description": ("On a combo turn (one fighter can only DI, burst or wait), what the "
+			+ "combo solver optimizes: damage (default), safe (avoid ending where they act first), corner (carry them toward the wall), "
+			+ "save_resources (spend little meter and no burst).")},
+		"combo_search": {"type": "boolean", "description": "false: treat a combo turn like any other (sweep and decision-model lines) instead of running the combo solver (default true)."},
 	}
 
 
@@ -791,7 +1025,7 @@ func look_ahead(slot: String, args: Dictionary, limit: int) -> Dictionary:
 	var cfg = settings()
 	var ctx = runtime.lookahead.context(slot, turn, cfg["max_options"])
 	var request = {"rank": true, "limit": limit, "focus": str(args.get("focus", "")), "opponent_style": str(args.get("opponent_style", "")),
-		"defenses": bool(args.get("defenses", true))}
+		"defenses": bool(args.get("defenses", true)), "combo": bool(args.get("combo_search", true)), "combo_goal": str(args.get("combo_goal", "damage"))}
 	for key in ["depth", "lines"]:
 		if args.has(key):
 			request[key] = Util.as_int(args[key])
@@ -809,7 +1043,7 @@ func look_ahead(slot: String, args: Dictionary, limit: int) -> Dictionary:
 	if not analysis["ok"]:
 		return analysis
 	analysis["notes"] = notes + analysis["notes"]
-	return summarize(analysis, str(args.get("detail", "summary")))
+	return LookAheadReport.summarize(analysis, str(args.get("detail", "summary")))
 
 
 # Options for moves a chat model named. Returns {"ok", "options", "notes"
@@ -861,155 +1095,3 @@ func resolve_moves(ctx: Dictionary, side: String, wanted: Array) -> Dictionary:
 		out.append(found)
 	return {"ok": true, "options": out, "notes": notes}
 
-
-# The analysis as the chat model sees it: where the runs start, how much was
-# covered, and per move what to submit, its average and worst case over the
-# replies, the likeliest and most dangerous replies, and the deep lines with
-# every step as submit_action takes it. detail "full" adds every reply.
-static func summarize(analysis: Dictionary, detail: String = "summary") -> Dictionary:
-	var full = detail == "full"
-	var replies = []
-	for reply in analysis["replies"]:
-		replies.append(reply["option"])
-	var moves = []
-	for entry in analysis["candidates"]:
-		var item = {"move": entry["option"]["label"]}
-		var action = Lookahead.action_of(entry["option"])
-		for key in action:
-			item[key] = action[key]
-		if not entry["replies"].empty():
-			var played = entry["replies"][0]["outcome"]["step"].get("you", {})
-			if played.get("engine_data") != null and Util.json_str(played["engine_data"]) != Util.json_str(action.get("data")):
-				item["engine_data"] = played["engine_data"]
-			if played.has("note"):
-				item["note"] = played["note"]
-		if entry.has("added"):
-			item["added"] = "defense: not one of the moves you named or the core picked"
-		if entry["tested"] > 0:
-			item["average"] = int(round(entry["average"]))
-			item["worst"] = {"reply": replies[entry["worst"]["index"]]["label"], "p": _percent(entry["worst"]["p"]),
-				"result": _result_text(entry["worst"]["outcome"]), "reply_action": Lookahead.action_of(replies[entry["worst"]["index"]])}
-			item["best"] = _reply_text(entry["best"], replies)
-			var likely = []
-			for reply in _likely(entry, 3):
-				likely.append(_reply_text(reply, replies))
-			item["likely"] = likely
-			var dangerous = []
-			for reply in _dangerous(entry, 3):
-				dangerous.append(_reply_text(reply, replies))
-			if not dangerous.empty():
-				item["dangerous"] = dangerous
-			if entry["tested"] < replies.size():
-				item["tested_against"] = "%d of %d replies" % [entry["tested"], replies.size()]
-			if full:
-				var all = []
-				for reply in _likely(entry, entry["replies"].size()):
-					all.append(_reply_text(reply, replies))
-				item["replies"] = all
-		else:
-			item["not_simulated"] = "out of thinking time before this move was played"
-		item["score"] = int(round(entry["score"]))
-		if entry.get("prior") != null:
-			item["decision_model_first_guess"] = _percent(float(entry["prior"]))
-		if analysis["ranking"].has(entry["option"]["label"]):
-			item["decision_model_pick"] = _percent(float(analysis["ranking"][entry["option"]["label"]]))
-		var lines = []
-		for line in entry["lines"]:
-			lines.append(_line_view(line, replies, analysis["depth"], full))
-		if not lines.empty():
-			item["lines"] = lines
-		moves.append(item)
-	var start = analysis["start"].duplicate()
-	start["preview"] = "matches the live match" if analysis["sweep"]["check"].empty() else {"differs_from_live": analysis["sweep"]["check"]}
-	var out = {"ok": true, "start": start, "coverage": _coverage(analysis, replies), "depth": analysis["depth"], "moves": moves,
-		"how_to_read": ("Each move was played on the real engine against the opponent's replies up to the next decision point. average: damage dealt "
-			+ "minus taken (a KO counts 1000) weighted by how likely each reply is; worst: the reply that hurts that move most; lines: deeper "
-			+ "imagined play with the decision models picking both sides, each step as submit_action takes it. score = average plus the deep lines. "
-			+ "Submit a move with its action, data and extra exactly as listed.")}
-	if analysis["lines_planned"] > 0:
-		out["lines_played"] = "%d of %d" % [analysis["lines_played"], analysis["lines_planned"]]
-	var best = ""
-	for label in analysis["ranking"]:
-		if best == "" or analysis["ranking"][label] > analysis["ranking"][best]:
-			best = label
-	if best != "":
-		out["decision_model_recommends"] = best
-	var notes = analysis["notes"].duplicate()
-	if analysis.has("ranking_error"):
-		notes.append("no ranking from the decision models: " + str(analysis["ranking_error"]))
-	if not notes.empty():
-		out["notes"] = notes
-	return out
-
-
-static func _coverage(analysis: Dictionary, replies: Array) -> String:
-	var moves = {}
-	for reply in replies:
-		moves[reply["action"]] = true
-	var sweep = analysis["sweep"]
-	var text = "your %d moves against %s: %d of %d exchanges played" % [analysis["candidates"].size(),
-		("the %d replies you named" % replies.size()) if analysis["replies_named"] else ("all %d opponent replies (%d moves and their variants)" % [replies.size(), moves.size()]),
-		sweep["played"], sweep["pairs"]]
-	if sweep["played"] < sweep["pairs"]:
-		text += "; out of time before the least likely replies (raise ai.core.think_s, or name fewer moves)"
-	return text
-
-
-# Replies that cost the entry damage or a KO, worst first.
-static func _dangerous(entry: Dictionary, n: int) -> Array:
-	var losses = []
-	var values = []
-	for item in entry["replies"]:
-		if item["value"] < 0:
-			losses.append(item)
-			values.append(-item["value"])
-	var out = []
-	for i in _ranked(values).slice(0, n - 1) if not values.empty() else []:
-		out.append(losses[i])
-	return out
-
-
-static func _line_view(line: Dictionary, replies: Array, depth: int, full: bool) -> Dictionary:
-	var out = {"vs": replies[line["reply"]]["label"], "turns": line["turns"],
-		"result": "dealt %d, took %d%s" % [line["dealt"], line["taken"], _ko_text(line["ko"])],
-		"stopped": stop_text(line["stop"], line.get("stop_detail", ""), line["turns"], depth)}
-	var steps = []
-	for step in line["steps"] if full else line["steps"].slice(0, STEPS_SHOWN - 1):
-		steps.append({"you": _step_view(step.get("you")), "opponent": _step_view(step.get("opponent"))})
-	out["steps"] = steps
-	if steps.size() < line["steps"].size():
-		out["more_steps"] = "%d more turns (detail: full shows them)" % (line["steps"].size() - steps.size())
-	return out
-
-
-# One fighter's move in a line, as submit_action takes it, plus what the
-# engine got when that differs.
-static func _step_view(played):
-	if not (played is Dictionary):
-		return "busy: keeps doing their move"
-	var out = {"move": played["move"]}
-	for key in played["action"]:
-		out[key] = played["action"][key]
-	if played.get("engine_data") != null and Util.json_str(played["engine_data"]) != Util.json_str(played["action"].get("data")):
-		out["engine_data"] = played["engine_data"]
-	if played.has("note"):
-		out["note"] = played["note"]
-	return out
-
-
-# Why a line ended, in words.
-static func stop_text(stop: String, detail: String, turns: int, depth: int) -> String:
-	match stop:
-		"depth":
-			return "played all %d turns" % turns
-		"ko":
-			return "KO after %d turns" % turns
-		"stuck":
-			return "stopped after %d of %d turns: no decision point within the tick limit (simulation.max_ticks), e.g. a long move" % [turns, depth]
-		"out_of_time":
-			return "stopped after %d of %d turns: out of thinking time (ai.core.think_s)" % [turns, depth]
-		"turn_over":
-			return "stopped after %d of %d turns: the live turn ended" % [turns, depth]
-		"model":
-			return "stopped after %d of %d turns: the decision model gave no move (%s)" % [turns, depth, detail]
-	return "stopped after %d of %d turns (%s)" % [turns, depth, stop]

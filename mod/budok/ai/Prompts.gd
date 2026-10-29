@@ -13,15 +13,18 @@ const QUICK_START := [
 	"Each turn, first decide what kind of turn it is from situation: being hit (DI away or burst), you act first (punish or keep the combo going), neutral (a guess: pick by spacing), they act first (block or get out).",
 	"Then shortlist 2-4 moves from your character's notes (use_when, beats, loses_to; startup and reach against spacing.distance_x), check the risky ones with simulate or look_ahead, mix up, and submit_action.",
 	("look_ahead plays your candidate moves (and your blocks and dodges) against every reply the opponent has, on the real engine, and gives "
-		+ "each move's average, worst case and an action ready to submit; with budok's decision core set up it also plays the best ones several "
-		+ "turns deep. Use it in neutral and at turning points, and decide yourself."),
+		+ "each move's average, worst case, the engine's recommendation and an action ready to submit; with budok's decision core set up it "
+		+ "also plays them several turns deep. On combo turns it searches the attacker's routes against every DI (combo.best_route). Use it in "
+		+ "neutral, on combo turns and at turning points, and decide yourself."),
 	"The full playbook: the play_match prompt, or the resource yomi://knowledge/playbook.",
 ]
 const TANDEM_PLAY := ("# Tandem: you lead a decision core\nlook_ahead does the hard work for you: it plays your candidate moves (and your "
-	+ "blocks and dodges) against every reply the opponent has on the real engine, then has fast decision models play the best ones further "
-	+ "(up to 30 turns, both fighters' moves chosen by the models), and reports each move's average, worst case and the reply behind it. "
-	+ "Prefer moves whose worst case you can live with. Steer it with focus and opponent_style, then decide and submit the move's action, "
-	+ "data and extra as listed. One or two look_ahead calls per turn are plenty; skip it when the choice is obvious.")
+	+ "blocks and dodges) against every reply the opponent has on the real engine, then has fast decision models play them further (up "
+	+ "to 30 turns, both fighters' moves chosen by the models), and reports each move's average, follow-up, worst case and the reply "
+	+ "behind it, and the engine's recommendation. On combo turns a combo solver searches the routes against every DI instead: play "
+	+ "combo.best_route's first move, or when you are being hit the recommended DI or burst. Prefer moves whose worst case you can live "
+	+ "with. Steer it with focus, opponent_style and combo_goal, then decide and submit the move's action, data and extra as listed. One "
+	+ "or two look_ahead calls per turn are plenty; skip it when the choice is obvious.")
 
 
 static func knowledge(topic: String) -> String:

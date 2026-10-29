@@ -83,16 +83,45 @@ look ahead on the real engine. For one turn:
    strength on pads with few aims), each direction, choice and switch, a slider's ends and middle. A
    move's guessed probability is shared by its variants. Likeliest replies go first, so if time runs out
    every candidate has met the same replies. This needs no model calls.
-3. Deep lines (one per parallel request the core has) start from the best candidates against their
-   likeliest and their worst reply and play on for `depth` turns in all. At every decision point inside
-   a line the models pick both fighters' moves, drawn from their probabilities so lines differ.
-4. A last request ranks the candidates, each now described with what the engine showed (average, worst
-   case, likeliest replies, lines).
+3. Deep lines (one per parallel request the core has) start from the candidates against the likeliest
+   reply (each candidate once, best first), then against each one's worst reply, and play on for
+   `depth` turns. Only turns where someone has a real choice count, and a line that reaches its depth in
+   the middle of a combo gets up to four more turns to finish it. At every decision point inside a line
+   the models pick both fighters' moves, drawn from their probabilities so lines differ.
+4. Each move's score is its next-exchange average plus its follow-up: what its lines gained or lost
+   after their first exchange. A reply without a line of its own borrows the follow-up of lines that
+   started from the same kind of position (you act first, even, they act first), so every move is scored
+   the same way. Lines cut short (out of time, no model answer) or still mid-combo are shown but not counted.
+5. The engine picks: the best score among moves whose worst case is not a KO against you. When other
+   moves score within 25 of it, a last request lets the models choose among those close calls, and
+   only those.
+
+**Combo turns** (one fighter can act and the other can only DI, burst or wait out a move) skip all of
+that: the combo solver searches the attacker's routes on the engine, without model requests.
+
+1. Every move the attacker has (each aim and variant) is played against no DI; the best six (plus any
+   moves you named, and the next move of the route chosen last turn) start a route each.
+2. A beam search grows the routes, three at a time, a step per round, until the combo ends (the
+   defender can act again), a KO, or 24 steps. Each step plays one variant of every move, then every
+   variant of the best two moves and finer aims around the best aimed one (22.5 degrees either side,
+   half and three-quarter strength).
+3. The best three routes are played again, the same moves, against every DI: none, and each of the
+   eight directions held for the whole combo. A route's **robust damage** is what it keeps whatever the
+   defender DIs; the route also shows where each DI ends it and what a burst at each step does.
+4. Attacking, the bot plays the first move of the most robust route. On the next turn it checks the
+   position against what the route predicted (and against which DI), searches again from the real
+   position, and keeps the planned move when nothing beats it. Being hit, it picks the DI (or burst)
+   that holds the attacker's best routes lowest; a burst counts as costing 120 damage.
+
+`combo_goal` on `look_ahead` changes what the solver optimizes: `damage` (default; spending a burst to
+extend a combo costs 120), `safe` (avoid ending where the opponent acts first), `corner` (carry them
+toward the wall behind them), `save_resources` (meter costs 60 a bar, a burst 300).
 
 Who uses it:
 
-- **`decision` controller**: plays the move drawn from that ranking (`ai.decide.pick: sample`, so the
-  bot is hard to read) or the top one (`best`).
+- **`decision` controller**: plays the engine's pick, or among close calls the move drawn from the
+  models' ranking (`ai.decide.pick: sample`, so the bot is hard to read) or their top one (`best`). Combo
+  turns are the solver's alone.
 - **`tandem` controller**: the chat model (`ai.play`) plays and calls the `look_ahead` tool, naming the
   moves and replies to test, how deep to look and a `focus` / `opponent_style` that steer the imagined
   lines. It gets a few lines per move back and decides itself, so the lookahead never fills its context.
@@ -124,7 +153,7 @@ Lookahead settings (also `ai.core`):
 | `max_options` | `48` | Options per question (the API allows 255). Each move's default input comes first, then other aims, directions or slider values. Lower it for models that reject long lists. |
 | `think_s` | `30` | Thinking time per turn, counted from the first answer (waiting for a free request doesn't count). Everything ends 5 s before the turn timeout. |
 | `request_timeout_s` | `20` | Per request. |
-| `frame_budget_ms` | `12` | Engine time the sweep and lines may use per frame. Higher thinks faster but makes the game less smooth. |
+| `frame_budget_ms` | `12` | Engine time the sweep, lines and combo solver may use per frame. Higher thinks faster but makes the game less smooth. |
 
 `ai.decide.pick` (`sample` or `best`) only affects the decision controller.
 
@@ -134,6 +163,13 @@ exchanges, roughly 15 ms of engine work each, so 8-12 s at the default frame bud
 thirds of `think_s` (the deep lines the rest). A preview is copied from the match once and then reset
 between exchanges, restoring only what an exchange changed (checked against fresh copies, exchange for
 exchange). A second `look_ahead` in the same turn reuses the exchanges already played.
+
+A combo turn is engine work only, and engine-heavy: an exchange in a combo costs about 30 ms (hits and
+knockback make ticks slower), so the solver plays about 15-20 exchanges a second at the default frame
+budget. With the default `think_s` that is a few hundred exchanges: every first move, three to five
+steps deeper on the best routes, and the DI check. Deep positions are copied once and every move is
+played from the copy, instead of replaying the route for each. Lower `think_s` makes combo turns
+shallower (the output says when routes were still going); a higher `frame_budget_ms` makes them faster.
 
 Which models:
 

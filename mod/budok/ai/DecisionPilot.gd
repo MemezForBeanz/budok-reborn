@@ -2,11 +2,11 @@ extends Node
 
 # Decision-model player: plays every slot whose controller is "decision" with
 # the decision core (ai/DecisionCore.gd). Each turn the core ranks your moves,
-# plays the best ones ahead on the real engine and ranks them again with what
-# it saw; the move is drawn from that ranking (ai.decide.pick "sample", so the
-# bot is hard to read) or is the top one ("best"). If the last ranking fails,
-# the simulations' own scores decide. Notes and lessons still come from chat
-# models; this player only reads them.
+# plays them ahead on the real engine and picks the best by what it saw; when
+# several are close, the models choose among those, and the move is drawn
+# from their ranking (ai.decide.pick "sample", so the bot is hard to read) or
+# is the top one ("best"). Combo turns are the combo solver's alone. Notes and
+# lessons still come from chat models; this player only reads them.
 
 const Util = preload("res://budok/core/Util.gd")
 
@@ -89,10 +89,16 @@ func _choose(analysis: Dictionary) -> Dictionary:
 	var mode = "best" if str(runtime.config.get_value("ai.decide.pick", "sample")) == "best" else "sample"
 	var option = runtime.core.pick(candidates, ranking, mode)
 	var notes = []
-	if analysis["depth"] > 0:
+	if analysis.has("combo"):
+		var plan = analysis["combo"]["plans"][0]
+		notes.append("combo solver, %s: %d exchanges, best route keeps %d damage against every DI%s" % [analysis["situation"],
+			analysis["combo"]["searched"]["exchanges"], plan["damage"]["robust"], "" if plan["validated"] else " (no DI check)"])
+		if analysis.has("route") and analysis["route"]["status"] != "new":
+			notes.append("route " + analysis["route"]["status"])
+	elif analysis["depth"] > 0:
 		notes.append("%d of %d lines, depth %d" % [analysis["lines_played"], analysis["lines_planned"], analysis["depth"]])
 	else:
 		notes.append("no simulations")
 	if analysis.has("ranking_error"):
-		notes.append("ranking failed, picked by simulations")
+		notes.append("ranking failed, the engine's pick")
 	return {"option": option, "summary": "%d%%, %s" % [int(round(float(ranking.get(option["label"], 0.0)) * 100)), PoolStringArray(notes).join("; ")]}

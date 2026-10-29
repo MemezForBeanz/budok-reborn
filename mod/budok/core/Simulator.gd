@@ -123,7 +123,7 @@ func take(game) -> Dictionary:
 	yield(get_tree(), "idle_frame")
 	if not Util.valid(game):
 		return {"ok": false, "error": "no match in progress"}
-	var key = "%d:%d" % [game.get_instance_id(), Util.as_int(Util.prop(game, "current_tick", 0))]
+	var key = _key(game)
 	if key != _pool_key:
 		release_pool()
 		_pool_key = key
@@ -136,6 +136,22 @@ func take(game) -> Dictionary:
 	if spawned["ok"]:
 		_bases[spawned["game"].get_instance_id()]["key"] = key
 	return spawned
+
+
+# Coroutine: a reusable copy of `source`, a preview standing at a decision
+# point; reset(copy, source) puts it back to that point, as long as source
+# does not tick meanwhile. Free it with discard(). Returns {"ok", "game"} or
+# {"ok": false, "error"}.
+func fork(source) -> Dictionary:
+	var spawned = yield(spawn(source, true), "completed")
+	if spawned["ok"]:
+		_bases[spawned["game"].get_instance_id()]["key"] = _key(source)
+	return spawned
+
+
+# What a reusable preview was copied from: the game and its tick.
+static func _key(game) -> String:
+	return "%d:%d" % [game.get_instance_id(), Util.as_int(Util.prop(game, "current_tick", 0))]
 
 
 # A preview from take(), for the next take() at the same decision point.
@@ -188,14 +204,14 @@ func _on_state_changed(stack, touched: Dictionary) -> void:
 			touched[str(state.name)] = true
 
 
-# Puts a preview from take() back to a copy of the live match, right away (no
-# frame passes). False when that cannot be done or did not work out: the
-# caller then discards it and takes another.
+# Puts a preview from take() (or fork()) back to a copy of the game it came
+# from, right away (no frame passes). False when that cannot be done or did
+# not work out: the caller then discards it and takes another.
 func reset(sim, game) -> bool:
 	if not Util.valid(sim) or not Util.valid(game):
 		return false
 	var base = _bases.get(sim.get_instance_id())
-	if base == null or base.get("key", "") != _pool_key:
+	if base == null or base.get("key", "") != _key(game):
 		return false
 	# Game.copy_to frees the target's objects while they leave its list, and
 	# its effects list keeps particles that are already gone: clear both first.
@@ -272,12 +288,18 @@ static func _restore(obj, values: Dictionary, skip: Array) -> void:
 # After a copy from the live match: everything in the preview is a ghost, and
 # the fighters' own variables are put back as the live match has them.
 # copy_to re-enters each fighter's current state, and entering some states
-# spends an air option or meter that the live match already spent.
+# spends an air option or meter that the live match already spent. A copy of
+# another preview (fork) also takes its tick count, which the fighters'
+# clocks follow, and the turn flags its decision point set.
 static func _settle(sim, game) -> void:
+	_align_names(sim, game)
 	var objs_map = Util.prop(sim, "objs_map", {})
 	for key in objs_map:
 		if Util.valid(objs_map[key]):
 			objs_map[key].is_ghost = true
+	var from_preview = bool(Util.prop(game, "is_ghost", false))
+	if from_preview:
+		sim.current_tick = game.current_tick
 	for id in [1, 2]:
 		var fighter = sim.get_player(id)
 		fighter.is_ghost = true
@@ -285,6 +307,29 @@ static func _settle(sim, game) -> void:
 		for name in Util.prop(live, "state_variables", []):
 			var value = live.get(name)
 			fighter.set(name, value.duplicate(true) if value is Array or value is Dictionary else value)
+		if from_preview:
+			fighter.busy_interrupt = live.busy_interrupt
+
+
+# Objects are found by name (objs_map: "P1", "P2", then "3", "4", ... by
+# spawn count), and copy_to names the objects it makes by the copy's own
+# count, while each copy keeps its source's name. Once the source has freed
+# an object the two disagree, and a fighter that tracks its projectile by
+# name (Ninja's grappling hook) finds another object. Rebuild the copy's map
+# with the source's names, the same size (each new object's RNG seed comes
+# from it), in place: every object shares it.
+static func _align_names(sim, game) -> void:
+	var source = Util.prop(game, "objs_map", null)
+	var map = Util.prop(sim, "objs_map", null)
+	if not (source is Dictionary and map is Dictionary):
+		return
+	var by_name = {"P1": sim.get_player(1), "P2": sim.get_player(2)}
+	for obj in sim.objects:
+		if Util.valid(obj):
+			by_name[str(obj.obj_name)] = obj
+	map.clear()
+	for key in source:
+		map[key] = by_name.get(str(key))
 
 
 func _step(sim, max_ticks: int, viewer: String, followups: Array) -> Dictionary:

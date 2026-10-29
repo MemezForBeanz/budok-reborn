@@ -14,9 +14,11 @@ YOMI Hustle process
    │    ├─ Observation       per-player snapshot + plain-language situation
    │    ├─ Simulator         what-if previews: fresh Game (ghost) + copy_to + tick, in a hidden viewport;
    │    │                    a pool of previews reset between runs at one decision point
-   │    └─ Lookahead         the sweep (every pair of moves for the next exchange) and lines played
-   │                         several turns ahead in previews (SimTurns: the panel's legality rules,
-   │                         the game's turn logic and each move's input variants, ported for previews)
+   │    ├─ Lookahead         the sweep (every pair of moves for the next exchange) and lines played
+   │    │                    several turns ahead in previews (SimTurns: the panel's legality rules,
+   │    │                    the game's turn logic and each move's input variants, ported for previews)
+   │    └─ ComboSolver       combo turns: beam search over the attacker's routes, checked against
+   │                         every DI; deep positions are forked (Simulator.fork) instead of replayed
    ├─ core/Roster           Global.name_paths + character loader registry (lazy loading of mods)
    ├─ core/Introspector     measured skeleton from the character scene (states, hitboxes, resources)
    ├─ core/SchemaStore      notes lookup (override → mod-shipped → bundled → generated → registry),
@@ -32,7 +34,9 @@ YOMI Hustle process
    │                        (Vercel AI Gateway /decision-model, TypeSafe /v1/systemone) via HTTPRequest
    ├─ ai/AutoPilot          token mode player (controllers "ai" and "tandem"; tandem adds look_ahead)
    ├─ ai/DecisionCore       decision models behind one dispatcher (ai.core.endpoints: keys, parallel
-   │                        requests, rate limits, failover) and the lookahead analysis; look_ahead
+   │                        requests, rate limits, failover) and the lookahead analysis (the engine
+   │                        picks; models choose among close calls; combo turns go to ComboSolver,
+   │                        whose route is remembered and checked next turn); look_ahead
    ├─ ai/DecisionPilot      decision-model player (controller "decision"): analyze, then pick
    ├─ ai/Annotator          token mode schema writer
    ├─ ui/SettingsView       all settings as four tabs (Play, Models, Chatbots, Characters)
@@ -57,6 +61,27 @@ YOMI Hustle process
    `on_action_submitted` with exactly the values the UI would produce.
 4. When the panel deactivates, the turn closes. The next decision point records the history entry from
    `ReplayManager.frames`, so the opponent's move is revealed only after it resolved. Undo truncates history.
+
+## Previews
+
+A preview is a fresh `Game` (a ghost) the live match is copied into with the game's own `copy_to`,
+ticked by hand and never drawn. Copying all of a fighter's ~120 states is the slow part, so a preview is
+copied once per decision point and then reset: the variables it had after the copy are put back, and only
+the states a run entered are copied again. The combo solver also copies a preview mid-route
+(`Simulator.fork`) to play many moves from one position. Two things budok adds to the game's copy:
+
+- **Object names.** Objects are found by name (`objs_map`: `"P1"`, `"P2"`, then `"3"`, `"4"`, ... by
+  spawn count), and `copy_to` names the objects it makes by the copy's own count. Once the live match
+  has freed an object the names disagree, and a fighter that tracks its projectile by name (Ninja's
+  grappling hook) finds another object. Each copy's map is rebuilt with the source's names and size (new
+  objects' RNG seeds come from its size).
+- **Fighter variables.** Entering the current state again during the copy can spend an air option or
+  meter twice, so each fighter's `state_variables` are put back from the source afterwards.
+
+While a preview ticks, `ReplayManager.resimulating` is set, as in the game's own resimulation: particles,
+afterimages and sounds are skipped, and nothing that plays out changes. Previews were checked against
+fresh copies (sweep exchanges, solver routes from forks: identical) and against the live match (one
+exchange in 120 differed, with three projectiles and a summon in flight).
 
 ## Fairness and safety
 

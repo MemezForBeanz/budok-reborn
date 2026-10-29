@@ -22,6 +22,9 @@ const Config = preload("res://budok/core/Config.gd")
 const SettingsView = preload("res://budok/ui/SettingsView.gd")
 const SpeechBubbles = preload("res://budok/ui/SpeechBubbles.gd")
 const Lookahead = preload("res://budok/core/Lookahead.gd")
+const ComboSolver = preload("res://budok/core/ComboSolver.gd")
+const Evidence = preload("res://budok/ai/Evidence.gd")
+const LookAheadReport = preload("res://budok/ai/LookAheadReport.gd")
 
 var failures := 0
 var checks := 0
@@ -40,6 +43,7 @@ func _init() -> void:
 	_test_notes_agent()
 	_test_decisions()
 	_test_sim_turns()
+	_test_combo_helpers()
 	_test_talk_and_playbook()
 	print("%d checks, %d failures" % [checks, failures])
 	quit(failures)
@@ -353,18 +357,26 @@ func _test_sweep_analysis() -> void:
 	check(abs(facts[0]["average"] - 75.0) < 0.01 and facts[0]["worst"]["index"] == 1 and facts[0]["best"]["index"] == 0 and facts[0]["tested"] == 2,
 		"each move gets its weighted average, worst and best reply")
 	check(facts[1]["tested"] == 1 and facts[1]["worst"]["index"] == 1, "replies the sweep did not reach are left out")
-	var entries = [{"score": 10.0, "worst": {"index": 1}, "option": candidate}, {"score": 50.0, "worst": {"index": 0}, "option": candidate}]
+	var both = [{"index": 0}, {"index": 1}]
+	var entries = [{"score": 10.0, "worst": {"index": 1}, "option": candidate, "tested": 2, "replies": both},
+		{"score": 50.0, "worst": {"index": 0}, "option": candidate, "tested": 2, "replies": both},
+		{"score": 90.0, "worst": {}, "option": candidate, "tested": 0, "replies": []}]
 	var lines = DecisionCore.deep_plan(entries, replies, [0.2, 0.8], 3, 10)
-	check(lines.size() == 3 and lines[0]["candidate"] == 1 and lines[0]["reply"] == 1 and lines[1]["reply"] == 0 and lines[2]["candidate"] == 0
-		and lines[2]["depth"] == 10, "deep lines go to the best moves, against their likeliest and their worst reply")
+	check(lines.size() == 3 and lines[0]["candidate"] == 1 and lines[0]["reply"] == 1 and lines[1]["candidate"] == 0 and lines[1]["reply"] == 1
+		and lines[2]["candidate"] == 1 and lines[2]["reply"] == 0 and lines[2]["depth"] == 10,
+		"deep lines: every move played against the likeliest reply first (best first), then against its worst")
+	_test_followup(candidate, replies, weights, hit, hurt)
 	facts[0]["lines"] = [{"reply": 0, "turns": 2, "dealt": 50, "taken": 0, "ko": "", "stop": "model", "stop_detail": "rate limited", "steps": [
 		{"you": played, "opponent": {"move": "x", "action": {"action": "x"}, "engine_data": null}},
 		{"you": {"move": "Jump up-fwd", "action": {"action": "Jump", "data": {"x": 71, "y": -71}}, "engine_data": {"x": 71, "y": -71}}}]}]
-	var summary = DecisionCore.summarize({"candidates": [facts[0]], "replies": [{"option": replies[0], "p": 0.9}, {"option": replies[1], "p": 0.1}],
-		"replies_named": false, "ranking": {"A": 1.0}, "depth": 10, "lines_played": 1, "lines_planned": 1, "notes": [],
-		"start": {"tick": 5, "you": {"hp": 1000}, "opponent": {"hp": 1000}}, "sweep": {"pairs": 2, "played": 2, "check": {}}})
+	var summary = LookAheadReport.summarize({"candidates": [facts[0]], "replies": [{"option": replies[0], "p": 0.9}, {"option": replies[1], "p": 0.1}],
+		"replies_named": false, "ranking": {"A": 1.0}, "ranking_by": "decision models", "engine": {"best": "A", "close": ["A"], "unsafe": []},
+		"depth": 10, "lines_played": 1, "lines_planned": 1, "notes": [], "start": {"tick": 5, "you": {"hp": 1000}, "opponent": {"hp": 1000}},
+		"sweep": {"pairs": 2, "played": 2, "check": {}}})
 	var move = summary["moves"][0]
-	check(summary["decision_model_recommends"] == "A" and move["action"] == "A" and not move.has("data") and move["average"] == 75
+	check(summary["recommended"]["move"] == "A" and summary["decision_model_pick"] == "A" and not summary.has("close_calls"),
+		"look_ahead says what the engine recommends and what the models picked")
+	check(move["action"] == "A" and not move.has("data") and move["average"] == 75
 		and move["worst"]["reply"] == "y high" and move["worst"]["reply_action"]["data"]["y"] == 1 and move["worst"]["result"].find("take 150") != -1,
 		"look_ahead shows the worst case with the reply to submit as opponent_moves")
 	check(move["dangerous"][0].find("vs y high (10%)") != -1 and move["likely"][0].find("vs x (90%): deal 100, you act first") != -1,
@@ -374,8 +386,33 @@ func _test_sweep_analysis() -> void:
 		and str(line["steps"][1]["opponent"]).find("busy") != -1, "line steps are executable and a short line says why it stopped")
 	check(summary["coverage"].find("all 2 opponent replies (2 moves") != -1 and summary["start"]["preview"] == "matches the live match",
 		"look_ahead says what it covered and where it started")
-	check(DecisionCore.stop_text("stuck", "", 3, 10).find("tick limit") != -1 and DecisionCore.stop_text("depth", "", 10, 10) == "played all 10 turns",
+	check(LookAheadReport.stop_text("stuck", "", 3, 10).find("tick limit") != -1 and LookAheadReport.stop_text("depth", "", 10, 10) == "played all 10 turns",
 		"every way a line ends is explained")
+
+
+# Scores: next exchange plus the follow-up, never the first exchange twice.
+func _test_followup(candidate: Dictionary, replies: Array, weights: Array, hit: Dictionary, hurt: Dictionary) -> void:
+	var core = DecisionCore.new()
+	var result = {"candidates": DecisionCore.facts([candidate, candidate], replies, weights, [[hit, hurt], [hurt, hit]]), "lines_planned": 0,
+		"lines_played": 0, "notes": []}
+	var lines = [{"candidate": 0, "reply": 0}, {"candidate": 1, "reply": 0}]
+	var results = [{"ok": true, "turns": 3, "dealt": 250, "taken": 0, "ko": "", "stop": "depth", "steps": [], "first": hit, "unresolved": false},
+		{"ok": true, "turns": 2, "dealt": 0, "taken": 300, "ko": "", "stop": "out_of_time", "steps": [], "first": hurt, "unresolved": true}]
+	core._add_lines(result, lines, results)
+	var a = result["candidates"][0]
+	var b = result["candidates"][1]
+	check(result["lines_played"] == 2 and abs(a["followup"] - 135.0) < 0.01 and abs(a["score"] - 210.0) < 0.01,
+		"a line's follow-up is what came after its first exchange, weighted by the reply's chance (not the first exchange again)")
+	check(abs(b["followup"] - 15.0) < 0.01 and b["followup_from"]["measured"] == 0 and b["followup_from"]["estimated"] == 1 and b["lines"][0]["unresolved"],
+		"a line cut short does not count; replies without a line borrow from lines that started from the same kind of position")
+	core.free()
+	var safe = {"tested": 2, "score": 20.0, "worst": {"outcome": {"ko": ""}}, "option": {"label": "Block"}}
+	var greedy = {"tested": 2, "score": 90.0, "worst": {"outcome": {"ko": "you"}}, "option": {"label": "Super"}}
+	var near = {"tested": 2, "score": 0.0, "worst": {"outcome": {"ko": ""}}, "option": {"label": "Jump"}}
+	var pick = Evidence.engine_labels([safe, greedy, near], Evidence.engine_pick([safe, greedy, near]))
+	check(pick["best"] == "Block" and pick["unsafe"] == ["Super"] and pick["close"] == ["Block", "Jump"],
+		"the engine's pick avoids a KO in the worst case; moves close to it are left to judgement")
+	check(Evidence.engine_pick([{"tested": 0}]).empty(), "nothing simulated, no pick")
 
 
 func _test_talk_and_playbook() -> void:
@@ -446,3 +483,32 @@ func _test_knowledge() -> void:
 	for topic in ["gameplay", "playbook", "engine", "characters", "action-ui", "modding", "annotating"]:
 		check(Prompts.knowledge(topic).length() > 200, "knowledge topic %s present" % topic)
 	check(Prompts.annotate_system().find("budok.character.v1") != -1, "annotation prompt includes the format")
+
+
+func _test_combo_helpers() -> void:
+	check(Lookahead.DI_VARIANTS.size() == 8 and SimTurns.aim_input(-135, 1.0, -1)["x"] == 71 and SimTurns.aim_input(-135, 1.0, -1)["y"] == -71,
+		"DI is tried in the four main directions and the diagonals (up-away facing left is up and to the right)")
+	var free_pad = {"kind": "xy", "panel": "full"}
+	var aims = ComboSolver._neighbours({"action": "Slash", "input": {"x": 100, "y": 0}, "description": "Slash (Attack)"}, free_pad, 1)
+	var inputs = []
+	for aim in aims:
+		inputs.append([aim["input"]["x"], aim["input"]["y"]])
+	check(Util.json_str(inputs) == Util.json_str([[92, -38], [92, 38], [50, 0], [75, 0]]) and aims[0]["label"] == "Slash aim 92,-38",
+		"finer aims: 22.5 degrees either side, then half and three-quarter strength")
+	check(ComboSolver._neighbours({"action": "Dash", "input": {"x": 100, "y": 0}, "description": ""}, {"kind": "xy", "always_max": true}, 1).size() == 2,
+		"a move that always uses full length gets no weaker aims")
+	var di_away = {"label": "Continue DI away", "action": "Continue", "input": null, "di": {"x": -100, "y": 0}}
+	var plain = {"label": "Continue", "action": "Continue", "input": null, "di": null}
+	var burst = {"label": "Burst", "action": "Burst", "input": null, "di": null}
+	check(ComboSolver._defense([plain, di_away, burst], {"option": di_away}) == di_away and ComboSolver._defense([plain, burst], {"option": di_away}) == plain
+		and ComboSolver._escapes([plain, di_away, burst]) == [burst], "the defender holds its DI where it can, else no DI; bursts are escapes")
+	var block = {"label": "Block", "action": "Block", "description": "Block (Defense)"}
+	var kick = {"label": "Kick", "action": "Kick", "description": "Kick (Attack)"}
+	check(ComboSolver._attacks([block, kick]) == [kick] and ComboSolver._attacks([block]) == [block], "defensive moves are left out of combos while anything else is legal")
+	var live = {"p1": {"hp": 900, "state": "Kick", "position": {"x": 10, "y": 0}}, "p2": {"hp": 700, "state": "HurtAerial", "position": {"x": 40, "y": -20}}}
+	var near = {"p1": {"hp": 900, "state": "Kick", "position": {"x": 12, "y": 0}}, "p2": {"hp": 700, "state": "HurtAerial", "position": {"x": 45, "y": -20}}}
+	var other = {"p1": {"hp": 900, "state": "Kick", "position": {"x": 10, "y": 0}}, "p2": {"hp": 650, "state": "HurtAerial", "position": {"x": 40, "y": -20}}}
+	check(DecisionCore._drift(near, live) == 7 and DecisionCore._drift(other, live) == -1, "a remembered route's prediction is matched by state and hp, then distance")
+	check(LookAheadReport.branch_end({"path": [1, 2, 3], "status": "ended", "end": "defender acts first"}, true) == "the opponent can act first after 3 steps"
+		and LookAheadReport.branch_end({"path": [1], "status": "open", "cut": "step limit (24)", "broke": "Kick is not possible at step 2"}, true).find("broke") != -1,
+		"every way a route ends is explained")

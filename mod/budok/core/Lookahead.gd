@@ -2,12 +2,15 @@ extends Node
 
 # Plays the match ahead on the real engine, in hidden preview games copied
 # from the live match (Simulator.take; a used preview is reset instead of
-# copied again). Two kinds of run:
+# copied again). Three kinds of run:
 #   - sweep(): the next exchange (up to the next decision point) for every
 #     pair of your candidates and the opponent's replies, all on one preview;
 #   - run_line(): one root pair, then both fighters' moves at each decision
 #     point from a policy (the decision core asks its models), until `depth`
-#     decision points have passed, someone is KO'd or time runs out.
+#     decision points with a real choice have passed (a combo in progress
+#     gets a few more), someone is KO'd or time runs out;
+#   - play_path(): a given sequence of both fighters' moves (the combo
+#     solver, core/ComboSolver.gd, searches with it).
 # All runs share a per-frame tick budget, so the game stays responsive, and
 # only wait for the next frame when it is spent.
 #
@@ -17,9 +20,15 @@ extends Node
 const Util = preload("res://budok/core/Util.gd")
 const PayloadSpec = preload("res://budok/core/PayloadSpec.gd")
 const SimTurns = preload("res://budok/core/SimTurns.gd")
+const Observation = preload("res://budok/core/Observation.gd")
 const NEUTRAL_EXTRA := {"DI": {"x": 0, "y": 0}, "reverse": false, "feint": false, "prediction": -1}
-const DI_VARIANTS := [["DI away", -1, 0], ["DI toward", 1, 0], ["DI up", 0, -1], ["DI down", 0, 1]]
+# DI tried when being hit: the four main directions, then the diagonals, in
+# screen degrees with toward the opponent = 0 and up = -90.
+const DI_VARIANTS := [["away", 180], ["toward", 0], ["up", -90], ["down", 90], ["up-away", -135], ["up-toward", -45], ["down-away", 135],
+	["down-toward", 45]]
 const MAX_DEPTH := 30
+# Extra turns a line may play past its depth while a combo is in progress.
+const COMBO_GRACE := 4
 
 var runtime = null
 var ticks_total := 0
@@ -81,8 +90,9 @@ func live_options(ctx: Dictionary, side: String, max_options: int = 0) -> Array:
 	return _options(fighter, legal, specs, ctx["sides"][side]["live_facing"], catalog["extras"].get("di") != null and SimTurns.is_hurt(fighter), max_options)
 
 
-# Options for `side` at a decision point inside a preview game.
-func sim_options(ctx: Dictionary, sim, side: String, busy: bool) -> Array:
+# Options for `side` at a decision point inside a preview game, at most
+# max_options of them (-1: ctx's max_options; 0: all).
+func sim_options(ctx: Dictionary, sim, side: String, busy: bool, max_options: int = -1) -> Array:
 	var fighter = _fighter(sim, side)
 	var specs = ctx["sides"][side]["specs"]
 	var legal = []
@@ -91,7 +101,7 @@ func sim_options(ctx: Dictionary, sim, side: String, busy: bool) -> Array:
 		if action == "Continue" or specs.has(action):
 			legal.append(action)
 	var di = busy and SimTurns.is_hurt(fighter) and bool(Util.prop(fighter, "di_enabled", true))
-	return _options(fighter, legal, specs, ctx["sides"][side]["facing"], di, ctx["max_options"])
+	return _options(fighter, legal, specs, ctx["sides"][side]["facing"], di, ctx["max_options"] if max_options < 0 else max_options)
 
 
 func _options(fighter, legal: Array, specs: Dictionary, spec_facing: int, with_di: bool, max_options: int) -> Array:
@@ -103,8 +113,7 @@ func _options(fighter, legal: Array, specs: Dictionary, spec_facing: int, with_d
 		if action == "Continue" and with_di:
 			first.append(_option("Continue", "", null, null, description))
 			for di in DI_VARIANTS:
-				rest.append(_option("Continue", di[0], null, {"x": di[1] * forward * PayloadSpec.XY_RANGE, "y": di[2] * PayloadSpec.XY_RANGE},
-					"Hold and steer your knockback " + di[0].substr(3)))
+				rest.append(_option("Continue", "DI " + di[0], null, SimTurns.aim_input(di[1], 1.0, forward), "Hold and steer your knockback " + di[0]))
 			continue
 		var variants = SimTurns.variants(specs.get(action, {"kind": "none"}), forward, spec_facing)
 		for i in range(variants.size()):
@@ -165,17 +174,11 @@ func sweep(ctx: Dictionary, candidates: Array, replies: Array, order: Array, dea
 			out["played"] += 1
 			continue
 		if sim != null:
-			var waited = _await_budget()
-			if waited is GDScriptFunctionState:
-				yield(waited, "completed")
-			var started = OS.get_ticks_usec()
-			var reset = runtime.simulator.reset(sim, runtime.matches.game)
-			_spent_usec += OS.get_ticks_usec() - started
-			if not reset:
-				runtime.simulator.discard(sim)
-				sim = null
+			sim = reuse(sim)
+			if sim is GDScriptFunctionState:
+				sim = yield(sim, "completed")
 		if sim == null:
-			var taken = yield(_take(), "completed")
+			var taken = yield(preview(), "completed")
 			if not taken["ok"]:
 				out["error"] = taken["error"]
 				break
@@ -200,12 +203,17 @@ func sweep(ctx: Dictionary, candidates: Array, replies: Array, order: Array, dea
 # Coroutine: plays one line. root: {slot: option} for the slots choosing now.
 # policy.choose(info) is a coroutine returning {slot: option} for the slots in
 # info["options"] that have more than one option, or {"error"} to stop the
-# line. Returns, from ctx's slot's point of view, {"ok", "turns", "dealt",
-# "taken", "ko", "first" (the next exchange, as sweep), "steps": [{"you",
-# "opponent"}] (each as _apply), "stop", "stop_detail"?} or {"ok": false,
+# line. Only decision points where someone has a real choice count toward
+# depth, and a line that reaches its depth while one fighter can only DI,
+# burst or wait (a combo or a punish in progress) plays up to COMBO_GRACE
+# more turns. Returns, from ctx's slot's point of view, {"ok", "turns"
+# (decision points with a choice, the root included), "dealt", "taken", "ko",
+# "first" (the next exchange, as sweep), "steps": [{"you", "opponent"}] (each
+# as _apply), "stop", "stop_detail"?, "unresolved" (it stopped before the
+# position settled: cut short, or still mid-combo)} or {"ok": false,
 # "error"}. stop: depth, ko, stuck, out_of_time, turn_over or model.
 func run_line(ctx: Dictionary, root: Dictionary, depth: int, policy, deadline_ms: int) -> Dictionary:
-	var taken = yield(_take(), "completed")
+	var taken = yield(preview(), "completed")
 	if not taken["ok"]:
 		return {"ok": false, "error": taken["error"]}
 	var sim = taken["game"]
@@ -219,9 +227,12 @@ func run_line(ctx: Dictionary, root: Dictionary, depth: int, policy, deadline_ms
 		return {"ok": false, "error": "the preview game was freed"}
 	var result = {"ok": true, "turns": 1, "first": first, "steps": [first["step"]]}
 	var stop = first["stop"]
+	var mid_combo = false
 	depth = int(clamp(depth, 1, MAX_DEPTH))
 	while stop == "decision":
-		if result["turns"] >= depth:
+		var busy = SimTurns.open_decision(sim)
+		mid_combo = busy[me] != busy[them]
+		if result["turns"] >= depth + (COMBO_GRACE if mid_combo else 0) or result["steps"].size() >= 2 * depth + COMBO_GRACE:
 			stop = "depth"
 		elif Util.now_ms() >= deadline_ms:
 			stop = "out_of_time"
@@ -229,7 +240,6 @@ func run_line(ctx: Dictionary, root: Dictionary, depth: int, policy, deadline_ms
 			stop = "turn_over"
 		if stop != "decision":
 			break
-		var busy = SimTurns.open_decision(sim)
 		var options = {}
 		var picks = {}
 		for side in [me, them]:
@@ -249,11 +259,8 @@ func run_line(ctx: Dictionary, root: Dictionary, depth: int, policy, deadline_ms
 				break
 			for side in options:
 				picks[side] = chosen[side] if chosen.get(side) is Dictionary else options[side][0]
-		var step = {}
-		for side in [me, them]:
-			step["you" if side == me else "opponent"] = _apply(ctx, sim, side, picks[side], false)
-		result["steps"].append(step)
-		result["turns"] += 1
+			result["turns"] += 1
+		result["steps"].append(_step(ctx, sim, picks))
 		var reached = _tick_to_decision(sim, ctx["max_ticks"])
 		if reached is GDScriptFunctionState:
 			reached = yield(reached, "completed")
@@ -264,34 +271,150 @@ func run_line(ctx: Dictionary, root: Dictionary, depth: int, policy, deadline_ms
 	for key in outcome:
 		result[key] = outcome[key]
 	result["stop"] = stop
+	result["unresolved"] = not (stop in ["depth", "ko"]) or (stop == "depth" and mid_combo)
 	runtime.simulator.give_back(sim)
 	return result
+
+
+# Plays `path` on a preview that holds the live match (fresh from preview()
+# or reuse()): path[0] has the moves of the slots choosing now, each later
+# entry the moves at the decision point after the one before ({side: option};
+# a side without one holds). Yields (and must be awaited) only when the
+# frame's tick budget runs out. Returns {"steps": [outcome as play_step],
+# "node" (as node_at)}, or {"gone": true} when the preview was freed.
+func play_path(ctx: Dictionary, sim, path: Array, with_options: bool = true):
+	var start = start_of(ctx, sim)
+	var steps = []
+	for i in range(path.size()):
+		if i > 0:
+			SimTurns.open_decision(sim)
+		var outcome = play_step(ctx, sim, path[i], start, i == 0)
+		if outcome is GDScriptFunctionState:
+			outcome = yield(outcome, "completed")
+		if outcome == null:
+			return {"gone": true}
+		steps.append(outcome)
+		if outcome["stop"] != "decision":
+			break
+	return {"steps": steps, "node": node_at(ctx, sim, steps.back()["stop"] if not steps.empty() else "decision", with_options)}
+
+
+# Both fighters' hp and state in a preview, where play_step counts from.
+func start_of(ctx: Dictionary, sim) -> Dictionary:
+	return {ctx["slot"]: SimTurns.snapshot(_fighter(sim, ctx["slot"])), ctx["other"]: SimTurns.snapshot(_fighter(sim, ctx["other"]))}
+
+
+# Plays picks ({side: option}) from the decision point a preview stands at, up
+# to the next one: at_root, the live decision point (only the slots choosing
+# there move); else a point inside the preview, where node_at (or
+# SimTurns.open_decision) already ran. Yields (and must be awaited) only when
+# the frame's tick budget runs out. Returns null when the preview was freed,
+# else the outcome as _exchange with dealt and taken counted from `start` and
+# "fighters": {side: fighter_view}.
+func play_step(ctx: Dictionary, sim, picks: Dictionary, start: Dictionary, at_root: bool = false):
+	var me = ctx["slot"]
+	var them = ctx["other"]
+	var step = {}
+	if at_root:
+		for side in ctx["choosing"]:
+			step["you" if side == me else "opponent"] = _apply(ctx, sim, side, picks.get(side, _hold()), true)
+	else:
+		step = _step(ctx, sim, picks)
+	var ticked = _tick_to_decision(sim, ctx["max_ticks"])
+	if ticked is GDScriptFunctionState:
+		ticked = yield(ticked, "completed")
+	if ticked["reached"] == "gone":
+		return null
+	var outcome = _outcome(ctx, sim, start)
+	outcome["ticks"] = ticked["ticks"]
+	outcome["stop"] = ticked["reached"]
+	outcome["step"] = step
+	outcome["fighters"] = {me: fighter_view(sim, me), them: fighter_view(sim, them)}
+	if ticked["reached"] == "decision":
+		outcome["next_turn"] = _next_turn(ctx, sim)
+	return outcome
+
+
+# The position a preview stopped at: {"reached": decision, ko or stuck, and at
+# a decision point "busy": {side: bool} and, with_options, "options": {side:
+# [option]} (all of them)}. At a decision point it opens the turn there
+# (SimTurns.open_decision), so call it once per point.
+func node_at(ctx: Dictionary, sim, reached: String, with_options: bool = true) -> Dictionary:
+	var node = {"reached": reached}
+	if reached == "decision":
+		node["busy"] = SimTurns.open_decision(sim)
+		if with_options:
+			node["options"] = {}
+			for side in [ctx["slot"], ctx["other"]]:
+				node["options"][side] = sim_options(ctx, sim, side, node["busy"][side], 0)
+	return node
+
+
+# Locks in both fighters' picks at a decision point inside a preview (after
+# SimTurns.open_decision). Returns {"you", "opponent"} as _apply.
+func _step(ctx: Dictionary, sim, picks: Dictionary) -> Dictionary:
+	var step = {}
+	for side in [ctx["slot"], ctx["other"]]:
+		step["you" if side == ctx["slot"] else "opponent"] = _apply(ctx, sim, side, picks.get(side, _hold()), false)
+	return step
+
+
+static func _hold() -> Dictionary:
+	return _option("Continue", "", null, null, "")
+
+
+# Who acts first at the decision point a preview has reached, for ctx's slot.
+static func _next_turn(ctx: Dictionary, sim) -> String:
+	var mine = bool(Util.prop(_fighter(sim, ctx["slot"]), "state_interruptable", false))
+	var theirs = bool(Util.prop(_fighter(sim, ctx["other"]), "state_interruptable", false))
+	return "even" if mine == theirs else ("you act first" if mine else "they act first")
+
+
+# A fighter in a preview, as SimTurns.describe plus whether it is being hit,
+# its combo count (hits it has landed in a row) and its distance to each wall.
+static func fighter_view(game, side: String) -> Dictionary:
+	var fighter = _fighter(game, side)
+	var out = SimTurns.describe(fighter)
+	out["hurt"] = SimTurns.is_hurt(fighter)
+	out["combo"] = Util.as_int(Util.prop(fighter, "combo_count", 0))
+	var walls = Observation.wall_distance(fighter, out["position"])
+	if not walls.empty():
+		out["walls"] = walls
+	return out
+
+
+# Who has the initiative at the live decision point: {"kind": "combo",
+# "attacker", "defender"} when one fighter can act and the other can only DI,
+# burst or wait out a move (being hit, or stuck in a move's recovery; right
+# after a hit both are busy, and the one being hit defends), else {"kind":
+# "open"}.
+func situation(ctx: Dictionary) -> Dictionary:
+	var busy = {}
+	var hurt = {}
+	for side in [ctx["slot"], ctx["other"]]:
+		var fighter = _fighter(runtime.matches.game, side)
+		busy[side] = bool(Util.prop(fighter, "busy_interrupt", false)) or not (side in ctx["choosing"])
+		hurt[side] = SimTurns.is_hurt(fighter)
+	var defender = ""
+	for side in busy:
+		var other = ctx["other"] if side == ctx["slot"] else ctx["slot"]
+		if busy[side] and (not busy[other] or (hurt[side] and not hurt[other])):
+			defender = side
+	if defender == "":
+		return {"kind": "open"}
+	return {"kind": "combo", "attacker": ctx["other"] if defender == ctx["slot"] else ctx["slot"], "defender": defender}
 
 
 # Plays root (the moves of the slots choosing now) up to the next decision
 # point. Yields (and must be awaited) only when the frame's tick budget runs
 # out. Returns {"dealt", "taken", "ko", "states", "next_turn"?, "ticks",
-# "stop": decision, ko, stuck or gone, "step": {"you"?, "opponent"?}}.
+# "stop": decision, ko, stuck or gone, "step": {"you"?, "opponent"?},
+# "fighters"} (see play_step).
 func _exchange(ctx: Dictionary, sim, root: Dictionary):
-	var me = ctx["slot"]
-	var start = {me: SimTurns.snapshot(_fighter(sim, me)), ctx["other"]: SimTurns.snapshot(_fighter(sim, ctx["other"]))}
-	var step = {}
-	for side in ctx["choosing"]:
-		step["you" if side == me else "opponent"] = _apply(ctx, sim, side, root.get(side, _option("Continue", "", null, null, "")), true)
-	var reached = _tick_to_decision(sim, ctx["max_ticks"])
-	if reached is GDScriptFunctionState:
-		reached = yield(reached, "completed")
-	if reached["reached"] == "gone":
-		return {"stop": "gone"}
-	var outcome = _outcome(ctx, sim, start)
-	outcome["ticks"] = reached["ticks"]
-	outcome["stop"] = reached["reached"]
-	outcome["step"] = step
-	if reached["reached"] == "decision":
-		var mine = bool(Util.prop(_fighter(sim, me), "state_interruptable", false))
-		var theirs = bool(Util.prop(_fighter(sim, ctx["other"]), "state_interruptable", false))
-		outcome["next_turn"] = "even" if mine == theirs else ("you act first" if mine else "they act first")
-	return outcome
+	var outcome = play_step(ctx, sim, root, start_of(ctx, sim), true)
+	if outcome is GDScriptFunctionState:
+		outcome = yield(outcome, "completed")
+	return outcome if outcome != null else {"stop": "gone"}
 
 
 # Locks in `option` for `side` in a preview. at_root: the live decision point,
@@ -325,8 +448,9 @@ func _apply(ctx: Dictionary, sim, side: String, option: Dictionary, at_root: boo
 
 
 # Coroutine: a preview of the live match, taking turns with other runs (setting
-# one up can take a few frames of work).
-func _take() -> Dictionary:
+# one up can take a few frames of work). Returns Simulator.take's result; hand
+# the preview back with runtime.simulator.give_back().
+func preview() -> Dictionary:
 	yield(get_tree(), "idle_frame")
 	while _spawning:
 		yield(get_tree(), "idle_frame")
@@ -336,24 +460,54 @@ func _take() -> Dictionary:
 	return taken
 
 
+# A preview that played something, put back to the game it was copied from
+# (source: the live match by default, or the preview it was forked from); its
+# cost counts toward the frame's budget. Yields (and must be awaited) only
+# when the budget is spent. Returns the preview, or null when it could not be
+# reset (it is freed then: take another).
+func reuse(sim, source = null):
+	var waited = _await_budget()
+	if waited is GDScriptFunctionState:
+		yield(waited, "completed")
+	var started = OS.get_ticks_usec()
+	var reset = runtime.simulator.reset(sim, source if source != null else runtime.matches.game)
+	_spent_usec += OS.get_ticks_usec() - started
+	if not reset:
+		runtime.simulator.discard(sim)
+		return null
+	return sim
+
+
 # Ticks until a decision point; returns {"reached": decision, ko, stuck (the
 # tick limit) or gone (the preview was freed), "ticks"}. Yields (and must be
 # awaited) only when the frame's tick budget runs out.
 func _tick_to_decision(sim, max_ticks: int):
 	var budget = _budget_usec()
+	# The game's replay resimulation flag skips particles, afterimages and
+	# sounds (deferred work no one sees in a preview) and nothing that plays out.
+	var replays = Util.autoload("ReplayManager")
+	var flag = Util.has_prop(replays, "resimulating")
 	for ticks in range(max_ticks):
 		while _spent_this_frame() >= budget:
 			yield(get_tree(), "idle_frame")
 		if not Util.valid(sim):
 			return {"reached": "gone", "ticks": ticks}
 		var started = OS.get_ticks_usec()
+		var resimulating = replays.resimulating if flag else false
+		if flag:
+			replays.resimulating = true
 		# tick() without show_state(): previews are never drawn.
 		sim.tick()
+		if flag:
+			replays.resimulating = resimulating
 		_spent_usec += OS.get_ticks_usec() - started
 		ticks_total += 1
-		if Util.as_int(Util.prop(sim.p1, "hp", 1)) <= 0 or Util.as_int(Util.prop(sim.p2, "hp", 1)) <= 0:
+		# Read directly: this runs every tick.
+		var p1 = sim.p1
+		var p2 = sim.p2
+		if p1.hp <= 0 or p2.hp <= 0:
 			return {"reached": "ko", "ticks": ticks + 1}
-		if SimTurns.at_decision(sim):
+		if p1.state_interruptable or p2.state_interruptable:
 			return {"reached": "decision", "ticks": ticks + 1}
 	return {"reached": "stuck", "ticks": max_ticks}
 

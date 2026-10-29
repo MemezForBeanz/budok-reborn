@@ -76,8 +76,13 @@ back to a safe move. All settings: [docs/settings.md](docs/settings.md).
 Decision models such as TypeSafe's Jev pick from fixed options and return a probability for each,
 instead of chatting. budok's **decision core** uses them to play the turn ahead on the real engine: it
 plays your best moves, and your blocks and dodges, against every reply the opponent has (each move and
-its aim, strength and direction variants), reports each move's average and worst case, and plays the
-best ones up to 30 turns deeper with the models choosing both fighters' moves. In **Models → Decision core**, add one or more decision models
+its aim, strength and direction variants), reports each move's average and worst case, and plays every
+move up to 30 turns deeper with the models choosing both fighters' moves. The engine's evidence picks
+the move; the models only choose among close calls. On combo turns (the opponent can only DI or burst)
+a **combo solver** takes over without any model: it searches every route on the engine, checks the best
+ones against every DI, plays the route that keeps the most damage whatever they DI, and checks the route
+against what really happened on the next turn. Being hit, it picks the DI or burst that holds the
+attacker's best routes lowest. In **Models → Decision core**, add one or more decision models
 (each with its own key; requests go to whichever has a free slot, so several keys add up). Then pick a
 mode in **Play**:
 
@@ -87,7 +92,7 @@ mode in **Play**:
   naming the moves to compare, how deep to look and what to focus on. It gets a short summary back, so
   deep lookahead costs it almost no context.
 - **Chatbots over MCP** get the same `look_ahead` tool. Without a decision model it still plays the
-  moves you name against every reply for the next exchange.
+  moves you name against every reply for the next exchange, and runs the combo solver on combo turns.
 
 Jev works with a TypeSafe key (`jev-latest`); through Vercel it needs paid credits, and Vercel's free tier
 offers other decision models at 5 requests a minute. Details: [docs/settings.md](docs/settings.md#aicore-the-decision-core-controllers-decision-and-tandem-mcp-look_ahead).
