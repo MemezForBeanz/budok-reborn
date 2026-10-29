@@ -512,3 +512,67 @@ func _test_combo_helpers() -> void:
 	check(LookAheadReport.branch_end({"path": [1, 2, 3], "status": "ended", "end": "defender acts first"}, true) == "the opponent can act first after 3 steps"
 		and LookAheadReport.branch_end({"path": [1], "status": "open", "cut": "step limit (24)", "broke": "Kick is not possible at step 2"}, true).find("broke") != -1,
 		"every way a route ends is explained")
+	_test_di_refinement()
+	_test_reversed_options()
+
+
+func _test_di_refinement() -> void:
+	check(ComboSolver._between(315.0, 0.0) == 337.5 and ComboSolver._between(0.0, 45.0) == 22.5 and ComboSolver._between(180.0, 225.0) == 202.5,
+		"DI refinement bisects neighbouring directions, across 0 too")
+	var names = []
+	for degrees in [0.0, 225.0, 337.5, 247.5, 101.25, 168.75]:
+		names.append(ComboSolver.di_name(degrees))
+	check(Util.json_str(names) == Util.json_str(["toward", "up-away", "toward 23° up", "up 23° away", "down 11° away", "away 11° down"]),
+		"finer directions are named from the nearest main one: %s" % Util.json_str(names))
+	var plain = {"label": "Continue", "action": "Continue", "input": null, "di": null}
+	var di_away = {"label": "Continue DI away", "action": "Continue", "input": null, "di": {"x": -100, "y": 0}}
+	var burst = {"label": "Burst", "action": "Burst", "input": null, "di": null}
+	var finer = {"label": "DI toward 23° up", "degrees": 337.5, "refined": true}
+	finer["option"] = ComboSolver._di_option(finer, 1)
+	var facing_right = ComboSolver._defense([plain, di_away, burst], finer, 1)
+	var facing_left = ComboSolver._defense([plain, di_away, burst], finer, -1)
+	check(facing_right["di"]["x"] == 92 and facing_right["di"]["y"] == -38 and facing_left["di"]["x"] == -92 and facing_right["label"] == "Continue DI toward 23° up",
+		"a finer DI is aimed from where the attacker is at each hit")
+	check(ComboSolver._defense([plain, burst], finer, 1) == plain, "a finer DI falls back to no DI where the defender cannot DI")
+
+
+func _test_reversed_options() -> void:
+	var dash = make("var reversible = true\nvar title = \"Dash\"\nvar type = 0\nfunc flip_allowed():\n\treturn true\n")
+	var grab = make("var reversible = true\nvar title = \"Grab\"\nvar type = 0\nfunc flip_allowed():\n\treturn false\n")
+	var slash = make("var reversible = false\nvar title = \"Slash\"\nvar type = 0\n")
+	var machine = make("var states_map = {}\n")
+	machine.states_map = {"Dash": dash, "Grab": grab, "Slash": slash}
+	var fighter = make("var state_machine = null\nfunc get_opponent_dir():\n\treturn 1\n")
+	fighter.state_machine = machine
+	check(Lookahead.can_flip(fighter, "Dash") and not Lookahead.can_flip(fighter, "Grab") and not Lookahead.can_flip(fighter, "Slash")
+		and not Lookahead.can_flip(fighter, "Missing"), "a move can be reversed when its state is reversible and allows flipping now")
+	var lookahead = Lookahead.new()
+	var legal = ["Dash", "Grab", "Slash"]
+	var specs = {"Dash": {"kind": "bool", "path": "Fast", "default": false}, "Grab": {"kind": "none"}, "Slash": {"kind": "none"}}
+	var counts = []
+	for reversed in ["", "default", "all"]:
+		var labels = []
+		for option in lookahead._options(fighter, legal, specs, 1, false, 0, reversed):
+			if option["reverse"]:
+				labels.append(option["label"])
+		counts.append(labels)
+	check(Util.json_str(counts) == Util.json_str([[], ["Dash reversed"], ["Dash reversed", "Dash Fast on reversed"]]),
+		"reversed variants: none, the move as it stands, or every variant: %s" % Util.json_str(counts))
+	var order = []
+	for option in lookahead._options(fighter, legal, specs, 1, false, 0, "all"):
+		order.append(option["label"])
+	check(order[3] == "Dash reversed" and order.back() == "Dash Fast on reversed", "each move as it stands comes first, then reversed, then the other variants")
+	lookahead.free()
+	for node in [dash, grab, slash, machine, fighter]:
+		node.free()
+	var turned = {"label": "Dash reversed", "action": "Dash", "input": null, "di": null, "reverse": true}
+	var straight = {"label": "Dash", "action": "Dash", "input": null, "di": null, "reverse": false}
+	check(Util.json_str(Lookahead._move_key(turned)) != Util.json_str(Lookahead._move_key(straight))
+		and Util.json_str(Lookahead._move_key(straight)) == Util.json_str(["Dash", null, null]), "a reversed move is another move; others keep their key")
+	check(Util.json_str(Lookahead.action_of(turned)) == Util.json_str({"action": "Dash", "extra": {"reverse": true}})
+		and Util.json_str(Lookahead.action_of(straight)) == Util.json_str({"action": "Dash"})
+		and Util.json_str(Lookahead.extra_of({"di": {"x": 1, "y": 0}, "reverse": true})) == Util.json_str({"di": {"x": 1, "y": 0}, "reverse": true}),
+		"reverse is submitted as extra.reverse")
+	var aims = ComboSolver._neighbours({"action": "Slash", "input": {"x": -100, "y": 0}, "description": "", "reverse": true}, {"kind": "xy", "always_max": true}, -1)
+	check(aims.size() == 2 and aims[0]["reverse"] and aims[0]["input"]["x"] == -92 and aims[0]["label"].ends_with(" reversed")
+		and ComboSolver._family(turned) == "Dash reversed" and ComboSolver._family(straight) == "Dash", "finer aims of a reversed move stay reversed, turned with it")

@@ -99,19 +99,33 @@ look ahead on the real engine. For one turn:
 **Combo turns** (one fighter can act and the other can only DI, burst or wait out a move) skip all of
 that: the combo solver searches the attacker's routes on the engine, without model requests.
 
-1. Every move the attacker has (each aim and variant) is played against no DI; the best six (plus any
-   moves you named, and the next move of the route chosen last turn) start a route each.
+1. Every move the attacker has (each aim and variant, and reversed: every move the game lets you
+   Reverse right now, turnarounds, reversed dashes and hits included) is played against no DI; the
+   best six (plus any moves you named, and the next move of the route chosen last turn) start a route
+   each.
 2. A beam search grows the routes, three at a time, a step per round, until the combo ends (the
-   defender can act again), a KO, or 24 steps. Each step plays one variant of every move, then every
-   variant of the best two moves and finer aims around the best aimed one (22.5 degrees either side,
-   half and three-quarter strength).
+   defender can act again), a KO, or 24 steps. Each step plays one variant of every move (a move and
+   the same move reversed count as two), then every variant of the best two and finer aims around the
+   best aimed one (22.5 degrees either side, half and three-quarter strength).
 3. The best three routes are played again, the same moves, against every DI: none, and each of the
-   eight directions held for the whole combo. A route's **robust damage** is what it keeps whatever the
-   defender DIs; the route also shows where each DI ends it and what a burst at each step does.
-4. Attacking, the bot plays the first move of the most robust route. On the next turn it checks the
+   eight directions held for the whole combo. Where two neighbouring directions do differently (the
+   combo ends at another step, a move stops connecting, or 10 damage apart), the direction halfway
+   between is played, then halfway again on each side that still differs (22.5, then 11.25 degrees;
+   up to 10 more per route), so a narrow window that drops the combo is found. They are named from the
+   nearest main direction: `DI toward 23° up`, `DI up 11° away`. This step gets 80% of the thinking
+   time. A route's **robust damage** is what it keeps whatever the defender DIs.
+4. Attacking, the leading route also meets a defender who switches DI at every hit: at each step it
+   takes, of the eight directions that held the route lowest, the one that leaves the attacker worst
+   off over that hit and the next (DI steers the hit's knockback, so whether the combo holds shows at
+   the next move). If that costs the route the lead, the new leader meets it too.
+5. A burst (and any other escape) is played at the first step of every checked route and along the
+   best one.
+6. Attacking, the bot plays the first move of the most robust route. On the next turn it checks the
    position against what the route predicted (and against which DI), searches again from the real
-   position, and keeps the planned move when nothing beats it. Being hit, it picks the DI (or burst)
-   that holds the attacker's best routes lowest; a burst counts as costing 120 damage.
+   position, and keeps the planned move when nothing beats it. Being hit, it compares every DI it has,
+   the finer directions included (each played against every checked route), and its escapes, and
+   picks the one that holds the attacker's best routes lowest; a burst counts as costing 120 damage.
+   It picks again at every hit, so it is itself a defender who switches DI.
 
 `combo_goal` on `look_ahead` changes what the solver optimizes: `damage` (default; spending a burst to
 extend a combo costs 120), `safe` (avoid ending where the opponent acts first), `corner` (carry them

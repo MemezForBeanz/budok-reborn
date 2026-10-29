@@ -92,8 +92,9 @@ static func summarize(analysis: Dictionary, detail: String = "summary") -> Dicti
 	if combo:
 		out["combo"] = _combo_view(analysis, full)
 		out["how_to_read"] = ("A combo turn: one fighter can only DI, burst or wait. The solver played the attacker's moves on the real engine (no "
-			+ "decision models): every first move, the best routes step by step until the combo ends, then those routes, the same moves, "
-			+ "against every DI (none, and eight directions held for the whole combo). robust_damage is what a route keeps whatever the "
+			+ "decision models): every first move (reversed ones too: extra.reverse), the best routes step by step until the combo ends, then "
+			+ "those routes, the same moves, against every DI (none and eight directions held for the whole combo, finer directions between "
+			+ "two that did differently, and a defender switching to the worst DI at every hit). robust_damage is what a route keeps whatever the "
 			+ "defender DIs, max_damage the most it does against one DI. Per move, average and worst are over the DIs (attacking) or over the "
 			+ "attacker's routes (defending), for the whole route, as damage dealt minus taken. Submit the recommended move with its action, "
 			+ "data and extra exactly as listed, and look again next turn from where the hit really sent them.")
@@ -141,11 +142,11 @@ static func _combo_view(analysis: Dictionary, full: bool) -> Dictionary:
 		"searched": "%d exchanges in %.1f s: %d first moves, %d rounds deeper%s" % [searched["exchanges"], searched["ms"] / 1000.0, searched["options"],
 			searched["rounds"], "; routes were still going when the thinking time ran out (ai.core.think_s)" if searched["stop"] == "out_of_time" else ""]}
 	var plans = solved["plans"]
-	out["best_route" if attacking else "their_best_route"] = _route_view(plans[0], solved, attacking, full)
+	out["best_route" if attacking else "their_best_route"] = _route_view(plans[0], attacking, full)
 	var others = []
 	for plan in plans.slice(1, min(3, plans.size() - 1)) if plans.size() > 1 else []:
 		others.append({"first": step_view(plan["route"]["result"]["steps"][0]["step"].get("you" if attacking else "opponent")),
-			"robust_damage": plan["damage"]["robust"], "max_damage": plan["damage"]["max"], "checked_against_every_di": plan["validated"]})
+			"robust_damage": plan["damage"]["robust"], "max_damage": plan["damage"]["max"], "checked": _checked_text(plan)})
 	if not others.empty():
 		out["other_routes" if attacking else "their_other_routes"] = others
 	if analysis.has("route"):
@@ -153,14 +154,13 @@ static func _combo_view(analysis: Dictionary, full: bool) -> Dictionary:
 	return out
 
 
-static func _route_view(plan: Dictionary, solved: Dictionary, attacking: bool, full: bool) -> Dictionary:
+static func _route_view(plan: Dictionary, attacking: bool, full: bool) -> Dictionary:
 	var who = "you" if attacking else "opponent"
 	var steps = []
 	for outcome in plan["route"]["result"]["steps"]:
 		steps.append(step_view(outcome["step"].get(who)))
 	var out = {"first": steps[0], "robust_damage": plan["damage"]["robust"], "expected_damage": int(round(plan["damage"]["expected"])),
-		"max_damage": plan["damage"]["max"],
-		"checked": ("against every DI (%d)" % solved["policies"].size()) if plan["validated"] else "against no DI only: out of time before the DI check",
+		"max_damage": plan["damage"]["max"], "checked": _checked_text(plan),
 		"steps": steps if full else steps.slice(0, min(STEPS_SHOWN, steps.size()) - 1)}
 	if steps.size() > out["steps"].size():
 		out["more_steps"] = "%d more (detail: full shows them)" % (steps.size() - out["steps"].size())
@@ -168,11 +168,21 @@ static func _route_view(plan: Dictionary, solved: Dictionary, attacking: bool, f
 		out["attacker_took_up_to"] = plan["taken"]
 	var by_di = []
 	var soonest = {}
-	for branch in plan["branches"]:
-		by_di.append({"di": branch["policy"]["label"], "damage": branch["dealt"], "end": branch_end(branch, attacking)})
+	var weakest = {}
+	for branch in _around(plan["branches"]):
+		var item = {"di": branch["policy"]["label"], "damage": branch["dealt"], "end": branch_end(branch, attacking)}
+		if branch["policy"].get("refined", false):
+			item["finer"] = true
+		if branch.has("dis"):
+			item["di_each_step"] = branch["dis"]
+		by_di.append(item)
 		if branch["status"] != "open" and (soonest.empty() or branch["path"].size() < soonest["path"].size()):
 			soonest = branch
+		if weakest.empty() or branch["dealt"] < weakest["dealt"]:
+			weakest = branch
 	out["by_di"] = by_di
+	if plan["validated"]:
+		out["weakest_di"] = "%s holds it to %d damage (%s)" % [weakest["policy"]["label"], weakest["dealt"], branch_end(weakest, attacking)]
 	if not soonest.empty() and plan["validated"]:
 		out["escape"] = "%s ends it soonest: after %d steps, %d damage" % [soonest["policy"]["label"], soonest["path"].size(), soonest["dealt"]]
 	var escapes = []
@@ -184,6 +194,42 @@ static func _route_view(plan: Dictionary, solved: Dictionary, attacking: bool, f
 		out["spends"] = plan["spent"]
 	out["ends"] = plan["end_position"]
 	return out
+
+
+# What a route was played against, in words.
+static func _checked_text(plan: Dictionary) -> String:
+	if not plan["validated"]:
+		return "against no DI only: out of time before the DI check"
+	var finer = 0
+	var switching = false
+	for branch in plan["branches"]:
+		finer += 1 if branch["policy"].get("refined", false) else 0
+		switching = switching or branch["policy"].get("switching", false)
+	var text = "against no DI and 8 directions held for the whole combo"
+	if finer > 0:
+		text += ", %d finer directions where the result changed" % finer
+	if switching:
+		text += ", and a defender switching to the worst DI at every hit"
+	return text
+
+
+# Branches in reading order: no DI, the directions around the circle (finer
+# ones between their neighbours), then the switching defender.
+static func _around(branches: Array) -> Array:
+	var none = []
+	var ring = []
+	var last = []
+	for branch in branches:
+		if branch["policy"].get("switching", false):
+			last.append(branch)
+		elif branch["policy"].get("degrees") == null:
+			none.append(branch)
+		else:
+			var at = ring.size()
+			while at > 0 and ring[at - 1]["policy"]["degrees"] > branch["policy"]["degrees"]:
+				at -= 1
+			ring.insert(at, branch)
+	return none + ring + last
 
 
 # How a route's branch ended, in words.

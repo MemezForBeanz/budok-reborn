@@ -37,8 +37,8 @@ escapes) and move fast on obvious turns.
    - `simulate`: one of your moves against one assumed reply, on the real engine. Exact for the next
      exchange: damage, whether it reaches, who acts first after.
    - `look_ahead`: plays each of your candidate moves (plus your blocks and dodges) against every reply
-     the opponent has, each move and its aim, strength and direction variants, up to the next decision
-     point. With budok's decision core set up it also picks your candidates if you don't name them and
+     the opponent has, each move and its aim, strength and direction variants (and reversed, for moves
+     that can Reverse), up to the next decision point. With budok's decision core set up it also picks your candidates if you don't name them and
      plays them several turns deeper, with fast decision models choosing both fighters' moves. On combo
      turns it runs the combo solver instead (no model needed). Use it in neutral, on combo turns and at
      turning points; skip it for obvious turns (one sensible move, forced holds).
@@ -74,8 +74,16 @@ escapes) and move fast on obvious turns.
     against one DI, and `by_di` gives each DI's damage and how it ends. `escape` is the DI that ends it
     soonest, `if_they_escape` / `if_you_escape` what a burst at each step does, `ends` where everyone
     stands after.
-  - `checked` says whether the route was played against every DI (or only no DI, if time ran out).
-    "still going ... (the search ended)" means the combo was still on when it stopped searching.
+  - `checked` says whether the route was played against every DI (or only no DI, if time ran out),
+    how many finer directions it found where the result changed, and whether it met a defender who
+    switches to the worst DI at every hit. In `by_di`, `finer` marks those in-between directions
+    (`DI toward 23° up` is toward the opponent, tilted 23 degrees up); `weakest_di` is the one that
+    holds the route lowest. "still going ... (the search ended)" means the combo was still on when it
+    stopped searching.
+  - Being hit, your moves include those finer directions: submit the recommended one's `extra.di`
+    exactly as listed. DI is aimed from where the attacker is, so look again at every hit.
+  - Routes use reversed moves (`extra.reverse: true`, "reversed" in the name) wherever the game lets
+    that move Reverse: a turnaround, a reversed dash or hit. Submit `extra` as listed.
   - `remembered_route`: whether this turn is where last turn's route said it would be, and whether its
     planned move is still the best.
   - `combo_goal` changes what it optimizes: `safe` (don't end where they act first), `corner` (carry

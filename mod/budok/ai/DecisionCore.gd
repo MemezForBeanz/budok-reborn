@@ -61,13 +61,15 @@ const SAMPLE_FLOOR := 0.1
 const BAD_KEY_PAUSE_MS := 300000
 const ERROR_PAUSE_MS := 10000
 const LOOK_AHEAD_HELP := ("Play this turn ahead on the real game engine. First it plays each of your candidate moves against EVERY legal "
-	+ "opponent reply (each move and its aim, strength and direction variants) up to the next decision point, and reports per move the average "
+	+ "opponent reply (each move and its aim, strength and direction variants, and reversed where it can Reverse) up to the next decision point, "
+	+ "and reports per move the average "
 	+ "(weighted by how likely each reply is), the worst case with the reply that causes it, and the likeliest and most dangerous replies. Your "
 	+ "defensive moves (block, low block, dodges) are added unless defenses is false. Then, with a decision model set up, it plays every move "
 	+ "several turns deeper with the models choosing both fighters' moves; score is the next exchange plus that follow-up, and recommended is the "
 	+ "engine's pick (close_calls are judgement calls). On a combo turn (one fighter can only DI, burst or wait) a combo solver searches the "
-	+ "attacker's routes instead, no model needed, and reports the route that keeps the most damage against every DI (combo.best_route, or "
-	+ "their_best_route and the DI or burst to pick when you are being hit). Every move and step comes as action, data and extra exactly as "
+	+ "attacker's routes instead, no model needed, and reports the route that keeps the most damage against every DI: eight directions, the finer "
+	+ "ones between where the result changes, and a defender switching DI at every hit (combo.best_route, or their_best_route and the DI, finer "
+	+ "ones included, or burst to pick when you are being hit). Every move and step comes as action, data and extra exactly as "
 	+ "submit_action takes them; start shows the position the runs start from. Name your candidates in moves (or omit them and the decision "
 	+ "core picks its top ones). It never reveals the opponent's real choice. You still decide: call submit_action afterwards.")
 
@@ -479,7 +481,9 @@ func _analyze_combo(slot: String, ctx: Dictionary, where: Dictionary, request: D
 		notes.append("opponent_moves is not used on a combo turn: the solver plays the %s's every move" % ("defender" if attacking else "attacker"))
 	var solver = ComboSolver.new(runtime)
 	var goal = str(request.get("combo_goal", "damage"))
-	var solved = yield(solver.solve(ctx, where["attacker"], deadline, {"goal": goal, "seeds": seeds}), "completed")
+	# Defending, you pick a DI again at every hit yourself: the time goes to every direction against every route and to escapes.
+	var solved = yield(solver.solve(ctx, where["attacker"], deadline, {"goal": goal, "seeds": seeds, "cross_fill": not attacking,
+		"switching": attacking}), "completed")
 	if runtime.matches.turn_for_token(ctx["token"]) == null:
 		return {"ok": false, "error": "the turn ended while thinking"}
 	if not solved["ok"]:
@@ -509,17 +513,20 @@ func _analyze_combo(slot: String, ctx: Dictionary, where: Dictionary, request: D
 # Attacking: one candidate per route the solver found, its replies the DI
 # policies (each with the route's result against it), scored by the solver's
 # own ranking (the worst policy, CONTINUE_BONUS while a combo is still going).
+# No DI and the eight directions share the average; the finer directions and
+# the switching defender only count toward the worst case.
 func _combo_attack(result: Dictionary, solved: Dictionary) -> void:
 	var policies = solved["policy_options"]
-	for option in policies:
-		result["replies"].append({"option": option, "p": 1.0 / policies.size()})
+	var base = solved["base_policies"]
+	for i in range(policies.size()):
+		result["replies"].append({"option": policies[i], "p": 1.0 / base if i < base else 0.0})
 	result["candidates"] = []
 	for plan in solved["plans"]:
 		var items = []
 		for branch in plan["branches"]:
 			var index = solved["policies"].find(branch["policy"]["label"])
 			var outcome = branch["result"]["steps"].back()
-			items.append({"index": index, "p": 1.0 / policies.size(), "value": Evidence.value(outcome), "outcome": outcome})
+			items.append({"index": index, "p": result["replies"][index]["p"], "value": Evidence.value(outcome), "outcome": outcome})
 		var entry = _entry(plan["first"], items)
 		entry["score"] = plan["value"]
 		entry["played"] = plan["route"]["result"]["steps"][0]
@@ -527,13 +534,19 @@ func _combo_attack(result: Dictionary, solved: Dictionary) -> void:
 		result["candidates"].append(entry)
 
 
-# Defending: your options at this point (DI each way, bursts and other
-# escapes), each against the attacker's routes. A DI's result is the
-# attacker's route played against that DI held for the whole combo (routes
-# checked against every DI; when none could be, only no DI has results); an
-# escape's is the attacker's first move against it, minus ESCAPE_COST for
-# what it spends. Scored by the worst result: the attacker picks the route.
+# Defending: your options at this point (DI each way, the finer directions
+# the solver found where routes change, bursts and other escapes), each
+# against the attacker's routes. A DI's result is the attacker's route played
+# against that DI held for the whole combo (routes checked against every DI;
+# when none could be, only no DI has results); an escape's is the attacker's
+# first move against it, minus ESCAPE_COST for what it spends. Scored by the
+# worst result: the attacker picks the route.
 func _combo_defend(result: Dictionary, solved: Dictionary, mine: Array) -> void:
+	mine = mine.duplicate()
+	var finer = []
+	for i in range(solved["base_policies"], solved["policy_options"].size() - 1):
+		mine.append(solved["policy_options"][i])
+		finer.append(solved["policy_options"][i]["label"])
 	var plans = []
 	for plan in solved["plans"]:
 		if plan["validated"]:
@@ -559,6 +572,9 @@ func _combo_defend(result: Dictionary, solved: Dictionary, mine: Array) -> void:
 			if outcome != null:
 				items.append({"index": r, "p": 1.0 / plans.size(), "value": Evidence.value(outcome) - (ESCAPE_COST if option["action"] != "Continue" else 0.0),
 					"outcome": outcome})
+		# A finer direction not played against every route would look better than it is.
+		if option["label"] in finer and items.size() < plans.size():
+			continue
 		var entry = _entry(option, items)
 		entry["score"] = entry["worst"]["value"] if not entry["worst"].empty() else -INF
 		result["candidates"].append(entry)
@@ -695,7 +711,7 @@ func _defenses(ctx: Dictionary, slot: String, options: Array, candidates: Array)
 	for option in options:
 		if out.size() >= MAX_DEFENSES:
 			break
-		if option["label"] in labels or option["action"] == "Continue":
+		if option["label"] in labels or option["action"] == "Continue" or option.get("reverse", false):
 			continue
 		var category = str(runtime.schemas.move_notes(info, option["action"]).get("category", "")) if not info.empty() else ""
 		if category == "defense" or (category == "" and SimTurns.describe_state(fighter, option["action"]).ends_with("(Defense)")):
@@ -1060,17 +1076,22 @@ func resolve_moves(ctx: Dictionary, side: String, wanted: Array) -> Dictionary:
 			var spec = catalog.get("specs", {}).get(name)
 			if spec == null:
 				return {"ok": false, "error": "%s is not legal for %s right now" % [name, side]}
-			var forward = Util.as_int(Util.call_or(Util.prop(runtime.matches.game, side, null), "get_opponent_dir", [], 1), 1)
+			var fighter = Util.prop(runtime.matches.game, side, null)
+			var extra = item.get("extra") if item.get("extra") is Dictionary else {}
+			var di = extra.get("di", extra.get("DI"))
+			var reverse = bool(extra.get("reverse", false))
+			if reverse and not Lookahead.can_flip(fighter, name):
+				return {"ok": false, "error": "%s cannot be reversed right now" % name}
+			# A reversed move's aim limits are read from the side it faces after flipping.
+			var forward = Util.as_int(Util.call_or(fighter, "get_opponent_dir", [], 1), 1) * (-1 if reverse else 1)
 			var coerced = PayloadSpec.coerce(SimTurns.facing_spec(spec, forward, ctx["sides"][side]["live_facing"]), item.get("data"), null)
 			if not coerced["ok"]:
 				return {"ok": false, "error": "%s data: %s" % [name, coerced["error"]]}
 			if coerced.has("note"):
 				notes.append("%s data: %s" % [name, coerced["note"]])
-			var extra = item.get("extra") if item.get("extra") is Dictionary else {}
-			var di = extra.get("di", extra.get("DI"))
-			found = {"label": name if item.get("data") == null else "%s %s" % [name, Util.truncate(Util.json_str(item["data"]), 40)], "action": name,
-				"input": item.get("data"), "di": di if di is Dictionary else null,
-				"description": SimTurns.describe_state(Util.prop(runtime.matches.game, side, null), name)}
+			var label = name if item.get("data") == null else "%s %s" % [name, Util.truncate(Util.json_str(item["data"]), 40)]
+			found = {"label": label + (" reversed" if reverse else ""), "action": name, "input": item.get("data"), "di": di if di is Dictionary else null,
+				"reverse": reverse, "description": SimTurns.describe_state(fighter, name)}
 			# The same move an earlier look_ahead listed keeps its name.
 			for option in available:
 				if Util.json_str(Lookahead._move_key(option)) == Util.json_str(Lookahead._move_key(found)):

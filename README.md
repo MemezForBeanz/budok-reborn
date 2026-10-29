@@ -76,13 +76,16 @@ back to a safe move. All settings: [docs/settings.md](docs/settings.md).
 Decision models such as TypeSafe's Jev pick from fixed options and return a probability for each,
 instead of chatting. budok's **decision core** uses them to play the turn ahead on the real engine: it
 plays your best moves, and your blocks and dodges, against every reply the opponent has (each move and
-its aim, strength and direction variants), reports each move's average and worst case, and plays every
-move up to 30 turns deeper with the models choosing both fighters' moves. The engine's evidence picks
-the move; the models only choose among close calls. On combo turns (the opponent can only DI or burst)
-a **combo solver** takes over without any model: it searches every route on the engine, checks the best
-ones against every DI, plays the route that keeps the most damage whatever they DI, and checks the route
-against what really happened on the next turn. Being hit, it picks the DI or burst that holds the
-attacker's best routes lowest. In **Models → Decision core**, add one or more decision models
+its aim, strength and direction variants, and reversed where the game allows a Reverse), reports each
+move's average and worst case, and plays every move up to 30 turns deeper with the models choosing both
+fighters' moves. The engine's evidence picks the move; the models only choose among close calls. On
+combo turns (the opponent can only DI or burst) a **combo solver** takes over without any model: it
+searches every route on the engine (reversed moves and turnarounds included), checks the best ones
+against no DI, eight directions and the finer directions in between wherever the result changes, and
+against a defender who switches to the worst DI at every hit, plays the route that keeps the most
+damage whatever they DI, and checks the route against what really happened on the next turn. Being
+hit, it picks the DI (finer directions included) or burst that holds the attacker's best routes
+lowest. In **Models → Decision core**, add one or more decision models
 (each with its own key; requests go to whichever has a free slot, so several keys add up). Then pick a
 mode in **Play**:
 

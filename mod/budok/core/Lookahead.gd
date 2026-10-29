@@ -15,7 +15,9 @@ extends Node
 # only wait for the next frame when it is spent.
 #
 # An option is one concrete move: {"label", "action", "input", "di",
-# "description"}; input is what submit_action takes as data (null = default).
+# "reverse", "description"}; input is what submit_action takes as data (null
+# = default), reverse flips the fighter to face away from the opponent for
+# the move (the panel's Reverse button), which also turns its aims around.
 
 const Util = preload("res://budok/core/Util.gd")
 const PayloadSpec = preload("res://budok/core/PayloadSpec.gd")
@@ -74,7 +76,9 @@ func context(slot: String, turn: Dictionary, max_options: int) -> Dictionary:
 
 # Options for `side` in the live match, from its turn's move list: each move
 # as it stands first, then its variants. max_options <= 0: all of them.
-func live_options(ctx: Dictionary, side: String, max_options: int = 0) -> Array:
+# reversed: which reversed variants a move that can flip gets ("default":
+# the move as it stands, reversed; "all": every variant; "": none).
+func live_options(ctx: Dictionary, side: String, max_options: int = 0, reversed: String = "default") -> Array:
 	if not (side in ctx["choosing"]):
 		return [_option("Continue", "", null, null, "Hold: keep doing what you are doing")]
 	var catalog = ctx["catalogs"].get(side, {})
@@ -87,12 +91,14 @@ func live_options(ctx: Dictionary, side: String, max_options: int = 0) -> Array:
 	var specs = ctx["sides"][side]["specs"].duplicate()
 	for action in catalog["specs"]:
 		specs[action] = catalog["specs"][action]
-	return _options(fighter, legal, specs, ctx["sides"][side]["live_facing"], catalog["extras"].get("di") != null and SimTurns.is_hurt(fighter), max_options)
+	return _options(fighter, legal, specs, ctx["sides"][side]["live_facing"], catalog["extras"].get("di") != null and SimTurns.is_hurt(fighter), max_options,
+		reversed)
 
 
 # Options for `side` at a decision point inside a preview game, at most
-# max_options of them (-1: ctx's max_options; 0: all).
-func sim_options(ctx: Dictionary, sim, side: String, busy: bool, max_options: int = -1) -> Array:
+# max_options of them (-1: ctx's max_options; 0: all); reversed as
+# live_options.
+func sim_options(ctx: Dictionary, sim, side: String, busy: bool, max_options: int = -1, reversed: String = "default") -> Array:
 	var fighter = _fighter(sim, side)
 	var specs = ctx["sides"][side]["specs"]
 	var legal = []
@@ -101,13 +107,18 @@ func sim_options(ctx: Dictionary, sim, side: String, busy: bool, max_options: in
 		if action == "Continue" or specs.has(action):
 			legal.append(action)
 	var di = busy and SimTurns.is_hurt(fighter) and bool(Util.prop(fighter, "di_enabled", true))
-	return _options(fighter, legal, specs, ctx["sides"][side]["facing"], di, ctx["max_options"] if max_options < 0 else max_options)
+	return _options(fighter, legal, specs, ctx["sides"][side]["facing"], di, ctx["max_options"] if max_options < 0 else max_options, reversed)
 
 
-func _options(fighter, legal: Array, specs: Dictionary, spec_facing: int, with_di: bool, max_options: int) -> Array:
+# Order: each move as it stands, then those that can flip reversed, then the
+# other variants, then the other reversed variants (a reversed move's aims
+# and directions are read from the side it faces after flipping).
+func _options(fighter, legal: Array, specs: Dictionary, spec_facing: int, with_di: bool, max_options: int, reversed: String = "default") -> Array:
 	var forward = _forward(fighter)
 	var first = []
+	var flipped = []
 	var rest = []
+	var flipped_rest = []
 	for action in legal:
 		var description = SimTurns.describe_state(fighter, action)
 		if action == "Continue" and with_di:
@@ -115,23 +126,42 @@ func _options(fighter, legal: Array, specs: Dictionary, spec_facing: int, with_d
 			for di in DI_VARIANTS:
 				rest.append(_option("Continue", "DI " + di[0], null, SimTurns.aim_input(di[1], 1.0, forward), "Hold and steer your knockback " + di[0]))
 			continue
-		var variants = SimTurns.variants(specs.get(action, {"kind": "none"}), forward, spec_facing)
+		var spec = specs.get(action, {"kind": "none"})
+		var variants = SimTurns.variants(spec, forward, spec_facing)
 		for i in range(variants.size()):
 			var option = _option(action, variants[i]["label"], variants[i]["input"], null, description)
 			if i == 0:
 				first.append(option)
 			else:
 				rest.append(option)
-	var out = first + rest
+		if reversed != "" and action != "Continue" and can_flip(fighter, action):
+			var turned = SimTurns.variants(spec, -forward, spec_facing)
+			for i in range(turned.size() if reversed == "all" else 1):
+				var label = "reversed" if turned[i]["label"] == "" else turned[i]["label"] + " reversed"
+				(flipped if i == 0 else flipped_rest).append(_option(action, label, turned[i]["input"], null, description, true))
+	var out = first + flipped + rest + flipped_rest
 	return out.slice(0, max_options - 1) if max_options > 0 and out.size() > max_options else out
 
 
-static func _option(action: String, variant: String, input, di, description: String) -> Dictionary:
-	return {"label": action if variant == "" else "%s %s" % [action, variant], "action": action, "input": input, "di": di, "description": description}
+# Whether `action` can be played reversed (the panel's Reverse button is
+# enabled for it): its state is reversible and allows flipping now.
+static func can_flip(fighter, action: String) -> bool:
+	var state = Util.prop(Util.prop(fighter, "state_machine", null), "states_map", {}).get(action)
+	if not Util.valid(state) or not bool(Util.prop(state, "reversible", false)):
+		return false
+	return not state.has_method("flip_allowed") or bool(state.flip_allowed())
+
+
+static func _option(action: String, variant: String, input, di, description: String, reverse: bool = false) -> Dictionary:
+	return {"label": action if variant == "" else "%s %s" % [action, variant], "action": action, "input": input, "di": di, "reverse": reverse,
+		"description": description}
 
 
 static func _move_key(option: Dictionary) -> Array:
-	return [option["action"], option.get("input"), option.get("di")]
+	var key = [option["action"], option.get("input"), option.get("di")]
+	if option.get("reverse", false):
+		key.append(true)
+	return key
 
 
 # What submit_action takes for an option: {"action", "data"?, "extra"?}.
@@ -139,9 +169,20 @@ static func action_of(option: Dictionary) -> Dictionary:
 	var out = {"action": option["action"]}
 	if option.get("input") != null:
 		out["data"] = option["input"]
-	if option.get("di") is Dictionary:
-		out["extra"] = {"di": option["di"]}
+	var extra = extra_of(option)
+	if not extra.empty():
+		out["extra"] = extra
 	return out
+
+
+# The extras submit_action takes for an option: {"di"?, "reverse"?}.
+static func extra_of(option: Dictionary) -> Dictionary:
+	var extra = {}
+	if option.get("di") is Dictionary:
+		extra["di"] = option["di"]
+	if option.get("reverse", false):
+		extra["reverse"] = true
+	return extra
 
 
 # Coroutine: the next exchange for pairs of candidates and replies, one
@@ -346,7 +387,7 @@ func node_at(ctx: Dictionary, sim, reached: String, with_options: bool = true) -
 		if with_options:
 			node["options"] = {}
 			for side in [ctx["slot"], ctx["other"]]:
-				node["options"][side] = sim_options(ctx, sim, side, node["busy"][side], 0)
+				node["options"][side] = sim_options(ctx, sim, side, node["busy"][side], 0, "all")
 	return node
 
 
@@ -430,7 +471,9 @@ func _apply(ctx: Dictionary, sim, side: String, option: Dictionary, at_root: boo
 		spec = live[option["action"]]
 		facing = ctx["sides"][side]["live_facing"]
 	var data = null
-	var coerced = PayloadSpec.coerce(SimTurns.facing_spec(spec, _forward(fighter), facing), option["input"], null)
+	# A reversed move faces away from the opponent, and its aim limits turn with it.
+	var reverse = bool(option.get("reverse", false))
+	var coerced = PayloadSpec.coerce(SimTurns.facing_spec(spec, _forward(fighter) * (-1 if reverse else 1), facing), option["input"], null)
 	if coerced["ok"]:
 		data = coerced["value"]
 	var extra = NEUTRAL_EXTRA.duplicate(true)
@@ -438,6 +481,7 @@ func _apply(ctx: Dictionary, sim, side: String, option: Dictionary, at_root: boo
 		extra[key] = ctx["sides"][side]["extras"][key]
 	if option.get("di") is Dictionary:
 		extra["DI"] = option["di"]
+	extra["reverse"] = reverse
 	fighter.on_action_selected(option["action"], data, extra)
 	var played = {"move": option["label"], "action": action_of(option), "engine_data": data}
 	if not coerced["ok"]:

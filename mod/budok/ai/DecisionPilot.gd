@@ -9,6 +9,7 @@ extends Node
 # lessons still come from chat models; this player only reads them.
 
 const Util = preload("res://budok/core/Util.gd")
+const Lookahead = preload("res://budok/core/Lookahead.gd")
 
 var runtime = null
 var stats := {"turns": 0, "fallbacks": 0, "last_error": "", "last_decision": "", "last_think_ms": 0}
@@ -57,7 +58,7 @@ func _take_turn(slot: String, token: String) -> void:
 	if runtime.matches.turn_for_token(token) != null:
 		var result = {"ok": false}
 		if pick != null:
-			result = runtime.matches.submit(token, pick["action"], pick["input"], {"di": pick["di"]} if pick["di"] is Dictionary else {}, "decision")
+			result = runtime.matches.submit(token, pick["action"], pick["input"], Lookahead.extra_of(pick), "decision")
 			if not result.get("ok", false):
 				stats["last_error"] = "submit %s: %s" % [pick["label"], result.get("message", result.get("error", ""))]
 		if not result.get("ok", false):

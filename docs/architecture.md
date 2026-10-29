@@ -80,8 +80,15 @@ the states a run entered are copied again. The combo solver also copies a previe
 
 While a preview ticks, `ReplayManager.resimulating` is set, as in the game's own resimulation: particles,
 afterimages and sounds are skipped, and nothing that plays out changes. Previews were checked against
-fresh copies (sweep exchanges, solver routes from forks: identical) and against the live match (one
-exchange in 120 differed, with three projectiles and a summon in flight).
+fresh copies (sweep exchanges, solver routes from forks, finer-DI and switching-DI branches: identical)
+and against the live match (one exchange in 120 differed, with three projectiles and a summon in
+flight; with reversed moves in two of three exchanges, hp, state, position and facing matched in 119
+of 120, one a fighter 2 pixels off).
+
+A move played reversed sets the game's `reverse` extra: entering a reversible state that is not a hurt
+state, the fighter turns to face away (`CharState`), and the aim pads turn with it. The game itself
+flips any reversible state; the panel's Reverse button also needs the state's `flip_allowed()`, so
+budok offers (and the solver replays) a reversed move only where both hold.
 
 ## Fairness and safety
 

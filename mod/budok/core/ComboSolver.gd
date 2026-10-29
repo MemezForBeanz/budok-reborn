@@ -23,13 +23,27 @@ extends Reference
 #      continuation instead;
 #   3. the best VALIDATE routes are played again, the same moves, against
 #      every other DI policy, until the combo ends or the route breaks (a move
-#      that is not possible there). A route is worth its worst policy: robust
+#      that is not possible there). Where two neighbouring directions do
+#      differently (the combo ends sooner, a move breaks, DI_DIFF damage), the
+#      direction halfway between is played, then halfway again on each side
+#      that still differs (DI_LEVELS deep: 22.5 then 11.25 degrees), so a
+#      narrow window that drops the combo is found. This step ends at
+#      CHECK_SHARE of the time. A route is worth its worst policy: robust
 #      damage is what it keeps whatever the defender DIs. The attacker sees
 #      the position before each move, so a live bot plays only the first move
 #      and searches again from what really happened (DecisionCore keeps the
 #      route to check how it went);
-#   4. the defender's escapes (burst, counters) are played at each step of
-#      the best route.
+#   4. the leading route also meets a defender who switches DI at every hit,
+#      each time to the direction (of the SWITCH_CHOICES that held the route
+#      lowest) that leaves the attacker worst off over that step and the next
+#      (DI steers the hit's knockback, so whether the combo holds shows at
+#      the next move); if that costs it the lead, the new leader meets it too;
+#   5. the defender's escapes (burst, counters) are played at the first step
+#      of every checked route and at each step of the best one; for a
+#      defending bot ("cross_fill"), every finer direction any route found
+#      is first played against every checked route, so each has them all.
+# Reversible moves are also searched reversed (the fighter turns to face away
+# for the move), each its own move: a turnaround, a reversed dash or hit.
 # Positions deep in a route are copied (Simulator.fork) to play many moves
 # from them, instead of replaying the route from the live match for each.
 
@@ -45,7 +59,19 @@ const VALIDATE := 3
 const FAMILIES := 2
 const REFINE := 1
 const AIM_STEP := 22.5
-const SEARCH_SHARE := 0.7
+const SEARCH_SHARE := 0.6
+# DI refinement: bisections between neighbouring directions, at most
+# DI_REFINE_MAX extra directions per route, and the damage difference that
+# counts as doing differently.
+const DI_LEVELS := 2
+const DI_REFINE_MAX := 10
+const DI_DIFF := 10
+# The switching defender: how many directions it picks from at each hit.
+const SWITCH_CHOICES := 8
+const SWITCHING := "DI switching each hit"
+# Checking routes against DI (step 3) stops at this share of the time; the
+# rest is for the switching defender and escapes.
+const CHECK_SHARE := 0.8
 # Moves to play from one position before copying it pays off over replaying
 # the route to it for each.
 const FORK_MIN := 6
@@ -66,6 +92,8 @@ var defender := ""
 var goal := "damage"
 var stats := {"exchanges": 0, "rounds": 0, "options": 0, "forks": 0}
 var _deadline := 0
+# When the current step must end (0: at the deadline).
+var _phase_end := 0
 # The main preview, which replays routes from the live match, and the key of
 # the route it stands at the end of ("" right after a reset).
 var _sim = null
@@ -74,9 +102,13 @@ var _dirty := false
 var _memo := {}
 var _start := {}
 var _hp := {}
-# [{"label", "option"}]: the defender's move at the live decision point for
-# each DI policy, no DI first.
+# [{"label", "option", "degrees"}]: the defender's move at the live decision
+# point for each DI policy, no DI first (degrees null), then the eight
+# directions (screen degrees, toward the attacker = 0, up = 270); and the
+# finer directions refinement added, by degrees.
 var _policies := []
+var _refined := {}
+var _root_forward := 1
 var _root_options := {}
 var _error := ""
 
@@ -87,9 +119,13 @@ func _init(runtime_ref) -> void:
 
 # Coroutine. options: {"goal"?: one of GOALS, "seeds"?: [option] (attacker
 # options at the live decision point to search whatever the first screen
-# says)}. Returns {"ok", "attacker", "defender", "goal", "policies": [label],
-# "policy_options": [the defender's option for each policy at the live
-# decision point], "plans": [plan] (best first), "searched": {"exchanges", "rounds" (beam
+# says), "cross_fill"? (play every finer DI direction found against every
+# checked route, so each has them all: the defender's view), "switching"?
+# (false: no switching defender, default true)}. Returns {"ok",
+# "attacker", "defender", "goal", "policies": [label], "policy_options": [the
+# defender's option for each policy at the live decision point: no DI, the
+# eight directions, the finer ones, then SWITCHING], "base_policies" (how many
+# of them are no DI and the eight), "plans": [plan] (best first), "searched": {"exchanges", "rounds" (beam
 # steps), "options" (first moves played), "forks", "stop": done or
 # out_of_time, "ms"}} or {"ok": false, "error"}. plan: {"first": option,
 # "route": {"path", "result"} (the best route found against no DI),
@@ -115,12 +151,15 @@ func solve(ctx_ref: Dictionary, attacker_side: String, deadline_ms: int, options
 	for side in [attacker, defender]:
 		_start[side] = Lookahead.fighter_view(game, side)
 	_hp = lookahead.start_of(ctx, game)
-	_root_options = {attacker: lookahead.live_options(ctx, attacker), defender: lookahead.live_options(ctx, defender)}
+	_root_options = {attacker: lookahead.live_options(ctx, attacker, 0, "all"), defender: lookahead.live_options(ctx, defender)}
+	_root_forward = Lookahead._forward(Lookahead._fighter(game, defender))
+	var compass = _compass()
 	for option in _root_options[defender]:
 		if option["action"] == "Continue":
-			_policies.append({"label": "no DI" if option.get("di") == null else option["label"].trim_prefix("Continue "), "option": option})
+			var label = "no DI" if option.get("di") == null else option["label"].trim_prefix("Continue ")
+			_policies.append({"label": label, "option": option, "degrees": compass.get(label)})
 	if _policies.empty():
-		_policies.append({"label": "no DI", "option": Lookahead._hold()})
+		_policies.append({"label": "no DI", "option": Lookahead._hold(), "degrees": null})
 	# 1. first moves
 	var root = {"path": [], "result": {"steps": [], "node": {"reached": "decision", "options": _root_options}}}
 	var seeds = options.get("seeds", [])
@@ -190,11 +229,13 @@ func solve(ctx_ref: Dictionary, attacker_side: String, deadline_ms: int, options
 			per_plan[child["plan"]] = per_plan.get(child["plan"], 0) + 1
 			beam.append(child)
 		stats["rounds"] += 1
-	# 3. the best routes against every DI policy
+	# 3. the best routes against every DI policy, until CHECK_SHARE of the time
+	_phase_end = started + int((_deadline - started) * CHECK_SHARE)
 	for plan in plans:
 		plan["branches"] = [_branch(_policies[0], plan["route"]["path"], plan["route"]["result"])]
 	var by_route = plans.duplicate()
 	by_route.sort_custom(self, "_route_higher")
+	var checked_plans = []
 	for plan in by_route.slice(0, VALIDATE - 1) if not by_route.empty() else []:
 		if _out_of_time():
 			stop = "out_of_time"
@@ -202,12 +243,43 @@ func solve(ctx_ref: Dictionary, attacker_side: String, deadline_ms: int, options
 		var checked = _validate(plan)
 		if checked is GDScriptFunctionState:
 			yield(checked, "completed")
+		if plan["validated"]:
+			var refined = _refine_di(plan)
+			if refined is GDScriptFunctionState:
+				yield(refined, "completed")
+			checked_plans.append(plan)
+	_phase_end = 0
 	for plan in plans:
 		_rate(plan)
 	plans.sort_custom(self, "_better")
-	# 4. escapes along the best route
+	# 4. a defender switching DI at every hit, against the leader until it holds the lead
+	for _i in range(VALIDATE if bool(options.get("switching", true)) else 0):
+		var leader = plans[0] if not plans.empty() else {}
+		if leader.empty() or not leader["validated"] or leader.get("switched", false) or _out_of_time():
+			break
+		var switched = _switch_di(leader)
+		if switched is GDScriptFunctionState:
+			yield(switched, "completed")
+		leader["switched"] = true
+		_rate(leader)
+		plans.sort_custom(self, "_better")
+	# 5. escapes at the first step of the best and every checked route (a defending bot picks among
+	# them); defending, then every finer direction against every checked route; then escapes along
+	# the rest of the best route.
+	for i in range(plans.size()):
+		if (i == 0 or plans[i]["validated"]) and not _out_of_time():
+			var first = _check_escapes(plans[i], 0, 1)
+			if first is GDScriptFunctionState:
+				yield(first, "completed")
+	if bool(options.get("cross_fill", false)) and not _out_of_time():
+		var filled = _cross_fill(checked_plans)
+		if filled is GDScriptFunctionState:
+			yield(filled, "completed")
+		for plan in plans:
+			_rate(plan)
+		plans.sort_custom(self, "_better")
 	if not plans.empty() and not _out_of_time():
-		var escaped = _check_escapes(plans[0])
+		var escaped = _check_escapes(plans[0], 1, MAX_STEPS)
 		if escaped is GDScriptFunctionState:
 			yield(escaped, "completed")
 	if _sim != null:
@@ -219,13 +291,15 @@ func solve(ctx_ref: Dictionary, attacker_side: String, deadline_ms: int, options
 		_finish(plan)
 	var labels = []
 	var moves = []
-	for policy in _policies:
+	for policy in _all_policies():
 		labels.append(policy["label"])
 		moves.append(policy["option"])
+	labels.append(SWITCHING)
+	moves.append(_switching_policy()["option"])
 	stats["stop"] = stop
 	stats["ms"] = Util.now_ms() - started
-	return {"ok": true, "attacker": attacker, "defender": defender, "goal": goal, "policies": labels, "policy_options": moves, "plans": plans,
-		"searched": stats}
+	return {"ok": true, "attacker": attacker, "defender": defender, "goal": goal, "policies": labels, "policy_options": moves,
+		"base_policies": _policies.size(), "plans": plans, "searched": stats}
 
 
 # The next step of a route ({"path", "result"}, or the live decision point
@@ -243,19 +317,22 @@ func _search(route: Dictionary):
 		at = {"path": route["path"], "result": played}
 	var options = _attacks(at["result"]["node"]["options"].get(attacker, []))
 	var defense = _defense(at["result"]["node"]["options"].get(defender, []), _policies[0])
+	# A move and the same move reversed are separate families: both get a coarse look.
 	var families = {}
 	var coarse = []
 	for option in options:
-		if not families.has(option["action"]):
-			families[option["action"]] = []
+		var family = _family(option)
+		if not families.has(family):
+			families[family] = []
 			coarse.append(option)
-		families[option["action"]].append(option)
+		families[family].append(option)
 	var out = _play(at, coarse, defense)
 	if out is GDScriptFunctionState:
 		out = yield(out, "completed")
 	var more = []
 	for item in out.slice(0, FAMILIES - 1) if not out.empty() else []:
-		more += families[item["option"]["action"]].slice(1, families[item["option"]["action"]].size() - 1) if families[item["option"]["action"]].size() > 1 else []
+		var family = families[_family(item["option"])]
+		more += family.slice(1, family.size() - 1) if family.size() > 1 else []
 	if not more.empty():
 		var played = _play(at, more, defense)
 		if played is GDScriptFunctionState:
@@ -273,7 +350,7 @@ func _search(route: Dictionary):
 		var spec = specs.get(item["option"]["action"], {})
 		if item["option"].get("input") is Dictionary and spec.get("kind") == "xy":
 			refined += 1
-			for option in _neighbours(item["option"], spec, forward):
+			for option in _neighbours(item["option"], spec, -forward if item["option"].get("reverse", false) else forward):
 				if _find(out, option) == null and _find(aims, option) == null:
 					aims.append(option)
 	if not aims.empty():
@@ -354,7 +431,8 @@ func _play(route: Dictionary, options: Array, defense: Dictionary):
 
 # Aims next to `option`'s: AIM_STEP degrees either side at the same strength,
 # and the same angle at half and three-quarter strength (unless the move
-# always uses full length), within the pad's limits.
+# always uses full length), within the pad's limits. forward: the side the
+# move faces (away from the opponent when it is reversed).
 static func _neighbours(option: Dictionary, spec: Dictionary, forward: int) -> Array:
 	var x = float(Util.as_int(option["input"].get("x", 0))) * forward
 	var y = float(Util.as_int(option["input"].get("y", 0)))
@@ -371,9 +449,15 @@ static func _neighbours(option: Dictionary, spec: Dictionary, forward: int) -> A
 			if abs(less - strength) > 0.1:
 				aims.append(SimTurns.aim_input(degrees, less, forward))
 	var out = []
+	var reverse = bool(option.get("reverse", false))
 	for aim in aims:
-		out.append(Lookahead._option(option["action"], "aim %d,%d" % [aim["x"], aim["y"]], aim, null, option["description"]))
+		out.append(Lookahead._option(option["action"], "aim %d,%d%s" % [aim["x"], aim["y"], " reversed" if reverse else ""], aim, null, option["description"],
+			reverse))
 	return out
+
+
+static func _family(option: Dictionary) -> String:
+	return option["action"] + (" reversed" if option.get("reverse", false) else "")
 
 
 # Plays the plan's route against every other DI policy: the same moves, until
@@ -399,10 +483,101 @@ func _validate(plan: Dictionary):
 	plan["validated"] = true
 
 
+# Where two neighbouring directions do differently against the plan's route,
+# plays the direction halfway between, and halfway again on each side that
+# still differs, DI_LEVELS deep (at most DI_REFINE_MAX new directions). The
+# new branches join the plan's.
+func _refine_di(plan: Dictionary):
+	yield(runtime.lookahead.get_tree(), "idle_frame")
+	var moves = _moves(plan)
+	var ring = []
+	for branch in plan["branches"]:
+		if branch["policy"].get("degrees") != null:
+			ring.append(branch)
+	ring.sort_custom(self, "_by_degrees")
+	var queue = []
+	for i in range(ring.size() if ring.size() > 1 else 0):
+		queue.append([ring[i], ring[(i + 1) % ring.size()], 1])
+	var played = 0
+	while not queue.empty() and played < DI_REFINE_MAX and not _out_of_time():
+		var pair = queue.pop_front()
+		if not _differs(pair[0], pair[1]):
+			continue
+		var policy = _refined_policy(_between(pair[0]["policy"]["degrees"], pair[1]["policy"]["degrees"]))
+		var branch = _branch_for(plan, policy)
+		if branch == null:
+			var followed = _follow(moves, policy)
+			if followed is GDScriptFunctionState:
+				followed = yield(followed, "completed")
+			if followed == null:
+				return
+			branch = _branch(policy, followed["path"], followed["result"])
+			if followed.has("broke"):
+				branch["broke"] = followed["broke"]
+			plan["branches"].append(branch)
+			played += 1
+		if pair[2] < DI_LEVELS:
+			queue.append([pair[0], branch, pair[2] + 1])
+			queue.append([branch, pair[1], pair[2] + 1])
+
+
+# Every finer direction any of `plans` found, played against each plan that
+# lacks it, so each plan has a result for every direction (the defender
+# chooses among them).
+func _cross_fill(plans: Array):
+	yield(runtime.lookahead.get_tree(), "idle_frame")
+	for plan in plans:
+		for key in _refined:
+			if _out_of_time():
+				return
+			if _branch_for(plan, _refined[key]) != null:
+				continue
+			var followed = _follow(_moves(plan), _refined[key])
+			if followed is GDScriptFunctionState:
+				followed = yield(followed, "completed")
+			if followed == null:
+				return
+			var branch = _branch(_refined[key], followed["path"], followed["result"])
+			if followed.has("broke"):
+				branch["broke"] = followed["broke"]
+			plan["branches"].append(branch)
+
+
+# The plan's route against a defender who switches DI at every hit: at each
+# of its decision points it takes, of the SWITCH_CHOICES directions that held
+# the route lowest, the one that leaves the attacker worst off over that step
+# and the next. The branch ("dis": the direction it took at each step) joins
+# the plan's; none does when time runs out first.
+func _switch_di(plan: Dictionary):
+	yield(runtime.lookahead.get_tree(), "idle_frame")
+	var held = []
+	for branch in plan["branches"]:
+		if not branch["policy"].get("switching", false):
+			held.append(branch)
+	held.sort_custom(self, "_lower")
+	var choices = []
+	for branch in held.slice(0, min(SWITCH_CHOICES, held.size()) - 1) if not held.empty() else []:
+		choices.append(branch["policy"])
+	if choices.size() < 2:
+		return
+	var followed = _follow(_moves(plan), _switching_policy(), choices)
+	if followed is GDScriptFunctionState:
+		followed = yield(followed, "completed")
+	if followed == null:
+		return
+	var branch = _branch(_switching_policy(), followed["path"], followed["result"])
+	branch["dis"] = followed["dis"]
+	if followed.has("broke"):
+		branch["broke"] = followed["broke"]
+	plan["branches"].append(branch)
+
+
 # Coroutine-like: `moves` (the attacker's, one per step) against `policy`,
-# from the live decision point. Returns {"path", "result", "broke"?} or null
-# when nothing could be played.
-func _follow(moves: Array, policy: Dictionary):
+# from the live decision point; with `choices` (policies), the defender takes
+# at each step the one of them that leaves the attacker worst off. Returns
+# {"path", "result", "broke"?, "dis"? (with choices)} or null when nothing
+# could be played.
+func _follow(moves: Array, policy: Dictionary, choices: Array = []):
 	var ready = _prepare()
 	if ready is GDScriptFunctionState:
 		ready = yield(ready, "completed")
@@ -412,15 +587,21 @@ func _follow(moves: Array, policy: Dictionary):
 	var steps = []
 	var node = {"reached": "decision", "options": _root_options}
 	var broke = ""
+	var dis = []
 	for j in range(moves.size()):
-		if j > 0:
-			var legal = false
-			for option in node["options"].get(attacker, []):
-				legal = legal or option["action"] == moves[j]["action"]
-			if not legal:
-				broke = "%s is not possible at step %d" % [moves[j]["label"], j + 1]
-				break
-		var step = {attacker: moves[j], defender: _defense(node["options"].get(defender, []), policy)}
+		if j > 0 and not _playable(node, moves[j]):
+			broke = "%s is not possible at step %d" % [moves[j]["label"], j + 1]
+			break
+		var defense = _defense(node["options"].get(defender, []), policy, _forward_at(_sim))
+		if not choices.empty():
+			var picked = _worst_defense(moves, j, node, choices, steps)
+			if picked is GDScriptFunctionState:
+				picked = yield(picked, "completed")
+			if picked == null:
+				return null
+			defense = picked["option"]
+			dis.append(picked["label"])
+		var step = {attacker: moves[j], defender: defense}
 		path.append(step)
 		_dirty = true
 		var outcome = runtime.lookahead.play_step(ctx, _sim, step, _hp, j == 0)
@@ -441,15 +622,91 @@ func _follow(moves: Array, policy: Dictionary):
 	var out = {"path": path, "result": result}
 	if broke != "":
 		out["broke"] = broke
+	if not choices.empty():
+		out["dis"] = dis
 	return out
 
 
-# The defender's other ways out along the best route against no DI: each
-# escape (burst, counters) the defender has at a step, against the move the
-# route plays there.
-func _check_escapes(plan: Dictionary):
+# Coroutine-like: of `choices`, the defender's move at step j of `moves` (the
+# main preview stands there, at `node`) that leaves the attacker worst off,
+# each tried on a copy of the position: the step, then the next move against
+# the same DI (DI steers the knockback of this step's hit, so whether the
+# combo holds shows at the next). Returns {"label", "option"}, or null when
+# they could not all be tried (out of time, no copy).
+func _worst_defense(moves: Array, j: int, node: Dictionary, choices: Array, steps: Array):
+	var forward = _forward_at(_sim)
+	var defenses = []
+	var seen = {}
+	for policy in choices:
+		var option = _defense(node["options"].get(defender, []), policy, forward)
+		var key = Util.json_str(Lookahead._move_key(option))
+		if not seen.has(key):
+			seen[key] = true
+			defenses.append({"label": policy["label"], "option": option, "policy": policy})
+	if defenses.size() == 1:
+		return defenses[0]
+	var forked = yield(runtime.simulator.fork(_sim), "completed")
+	if not forked["ok"]:
+		return null
+	var fork = forked["game"]
+	stats["forks"] += 1
+	var worst = {}
+	for i in range(defenses.size()):
+		if _out_of_time():
+			worst = {}
+			break
+		if i > 0:
+			var reused = runtime.lookahead.reuse(fork, _sim)
+			if reused is GDScriptFunctionState:
+				reused = yield(reused, "completed")
+			fork = reused
+			if fork == null:
+				worst = {}
+				break
+		var tried = steps.duplicate()
+		var at = node
+		var pair = {attacker: moves[j], defender: defenses[i]["option"]}
+		for k in range(j, min(j + 2, moves.size())):
+			if k > j:
+				if _status({"steps": tried, "node": at})["status"] != "open" or not _playable(at, moves[k]):
+					break
+				pair = {attacker: moves[k], defender: _defense(at["options"].get(defender, []), defenses[i]["policy"], _forward_at(fork))}
+			var outcome = runtime.lookahead.play_step(ctx, fork, pair, _hp, k == 0)
+			if outcome is GDScriptFunctionState:
+				outcome = yield(outcome, "completed")
+			if outcome == null:
+				fork = null
+				break
+			stats["exchanges"] += 1
+			tried.append(outcome)
+			at = runtime.lookahead.node_at(ctx, fork, outcome["stop"], k == j and k + 1 < moves.size())
+		if fork == null:
+			worst = {}
+			break
+		var value = _value({"steps": tried, "node": at})
+		if worst.empty() or value < worst["value"]:
+			worst = {"label": defenses[i]["label"], "option": defenses[i]["option"], "value": value}
+	if fork != null:
+		runtime.simulator.discard(fork)
+	return worst if not worst.empty() else null
+
+
+# Whether the attacker can play `move` at a node: the same move is legal there
+# (a reversed one only where it can flip there).
+func _playable(node: Dictionary, move: Dictionary) -> bool:
+	var reverse = bool(move.get("reverse", false))
+	for option in node["options"].get(attacker, []):
+		if option["action"] == move["action"] and bool(option.get("reverse", false)) == reverse:
+			return true
+	return false
+
+
+# The defender's other ways out along a route against no DI, at steps first
+# to last - 1: each escape (burst, counters) the defender has at a step,
+# against the move the route plays there.
+func _check_escapes(plan: Dictionary, first: int, last: int):
 	var path = plan["route"]["path"]
-	for k in range(path.size()):
+	for k in range(first, min(last, path.size())):
 		var before = {"node": {"options": _root_options}} if k == 0 else _memo.get(_key(path.slice(0, k - 1)))
 		if before == null or not before["node"].has("options"):
 			continue
@@ -523,7 +780,8 @@ func _prepare():
 
 
 func _out_of_time() -> bool:
-	return _error != "" or Util.now_ms() >= _deadline or runtime.matches.turn_for_token(ctx["token"]) == null
+	var now = Util.now_ms()
+	return _error != "" or now >= _deadline or (_phase_end > 0 and now >= _phase_end) or runtime.matches.turn_for_token(ctx["token"]) == null
 
 
 static func _key(path: Array) -> String:
@@ -614,16 +872,20 @@ func _carry(end: Dictionary) -> float:
 	return float(_start[defender]["walls"][behind] - end[defender]["walls"][behind])
 
 
-# A plan is worth its worst branch; the mean breaks ties.
+# A plan is worth its worst branch (finer directions and the switching
+# defender included); the mean over no DI and the eight directions breaks ties.
 func _rate(plan: Dictionary) -> void:
 	var worst = INF
 	var total = 0.0
+	var count = 0
 	for branch in plan["branches"]:
 		var value = _value(branch["result"])
 		worst = min(worst, value)
-		total += value
+		if not branch["policy"].get("refined", false) and not branch["policy"].get("switching", false):
+			total += value
+			count += 1
 	plan["value"] = worst
-	plan["mean"] = total / plan["branches"].size()
+	plan["mean"] = total / max(1, count)
 
 
 # Damage over the branches, for the report; branches still going count what
@@ -631,6 +893,10 @@ func _rate(plan: Dictionary) -> void:
 func _finish(plan: Dictionary) -> void:
 	var totals = {"robust": INF, "expected": 0.0, "max": -INF}
 	var taken = 0
+	var base = 0
+	for branch in plan["branches"]:
+		if not branch["policy"].get("refined", false) and not branch["policy"].get("switching", false):
+			base += 1
 	for branch in plan["branches"]:
 		if branch["status"] == "open" and not branch.has("cut"):
 			branch["cut"] = "the search ended" if plan["validated"] else "only the first step was played against this DI"
@@ -640,7 +906,9 @@ func _finish(plan: Dictionary) -> void:
 		branch["ko"] = hurt["ko"]
 		totals["robust"] = min(totals["robust"], hurt["dealt"])
 		totals["max"] = max(totals["max"], hurt["dealt"])
-		totals["expected"] += float(hurt["dealt"]) / plan["branches"].size()
+		# Expected over no DI and the eight directions: the finer ones are only played where it matters.
+		if not branch["policy"].get("refined", false) and not branch["policy"].get("switching", false):
+			totals["expected"] += float(hurt["dealt"]) / base
 		taken = int(max(taken, hurt["taken"]))
 	totals["robust"] = int(totals["robust"])
 	totals["max"] = int(totals["max"])
@@ -679,6 +947,10 @@ static func _higher(a: Dictionary, b: Dictionary) -> bool:
 	return a["value"] > b["value"]
 
 
+func _lower(a: Dictionary, b: Dictionary) -> bool:
+	return _value(a["result"]) < _value(b["result"])
+
+
 # Attacker options worth searching: defensive moves (blocks, dodges) cannot
 # extend a combo, so they are left out while anything else is legal.
 static func _attacks(options: Array) -> Array:
@@ -697,16 +969,113 @@ static func _escapes(options: Array) -> Array:
 	return out
 
 
-# The defender's move for `policy` among a position's options: the same DI,
-# else no DI.
-static func _defense(options: Array, policy: Dictionary) -> Dictionary:
+# The defender's move for `policy` among a position's options: the same DI;
+# a finer direction (refinement's) aimed from `forward` (the side the
+# attacker is on), where the defender can DI at all; else no DI.
+static func _defense(options: Array, policy: Dictionary, forward: int = 0) -> Dictionary:
 	for option in options:
 		if option["label"] == policy["option"]["label"]:
 			return option
+	if forward != 0 and policy.get("refined", false):
+		for option in options:
+			if option["action"] == "Continue" and option.get("di") is Dictionary:
+				return _di_option(policy, forward)
 	for option in options:
 		if option["action"] == "Continue" and option.get("di") == null:
 			return option
 	return options[0] if not options.empty() else Lookahead._hold()
+
+
+static func _di_option(policy: Dictionary, forward: int) -> Dictionary:
+	return Lookahead._option("Continue", policy["label"], null, SimTurns.aim_input(policy["degrees"], 1.0, forward),
+		"Hold and steer your knockback " + policy["label"].trim_prefix("DI "))
+
+
+func _forward_at(game) -> int:
+	return Lookahead._forward(Lookahead._fighter(game, defender))
+
+
+# The finer direction at `degrees` (one per direction, shared by the plans).
+func _refined_policy(degrees: float) -> Dictionary:
+	var key = "%.2f" % degrees
+	if not _refined.has(key):
+		var policy = {"label": "DI " + di_name(degrees), "degrees": degrees, "refined": true}
+		policy["option"] = _di_option(policy, _root_forward)
+		_refined[key] = policy
+	return _refined[key]
+
+
+# No DI, the eight directions, then the finer ones around the circle.
+func _all_policies() -> Array:
+	var finer = _refined.values()
+	finer.sort_custom(self, "_by_policy_degrees")
+	return _policies + finer
+
+
+static func _switching_policy() -> Dictionary:
+	return {"label": SWITCHING, "switching": true, "degrees": null, "option": {"label": SWITCHING, "action": "Continue", "input": null, "di": null,
+		"description": "A defender who picks the DI that is worst for you at every hit"}}
+
+
+func _branch_for(plan: Dictionary, policy: Dictionary):
+	for branch in plan["branches"]:
+		if branch["policy"]["label"] == policy["label"]:
+			return branch
+	return null
+
+
+func _moves(plan: Dictionary) -> Array:
+	var moves = []
+	for step in plan["route"]["path"]:
+		moves.append(step[attacker])
+	return moves
+
+
+# Whether a route does differently against two directions: the combo ends at
+# another step or in another way, a move breaks, or DI_DIFF damage apart.
+func _differs(a: Dictionary, b: Dictionary) -> bool:
+	if a["status"] != b["status"] or a["path"].size() != b["path"].size() or a.has("broke") != b.has("broke"):
+		return true
+	return abs(damage(a["result"])["dealt"] - damage(b["result"])["dealt"]) >= DI_DIFF
+
+
+# The eight directions by name ("DI away"), in degrees 0-360.
+static func _compass() -> Dictionary:
+	var out = {}
+	for di in Lookahead.DI_VARIANTS:
+		out["DI " + di[0]] = fposmod(float(di[1]), 360.0)
+	return out
+
+
+# The direction halfway from a to b going around the circle the way the
+# directions are sorted (increasing degrees, wrapping at 360).
+static func _between(a: float, b: float) -> float:
+	return fposmod(a + fposmod(b - a, 360.0) / 2.0, 360.0)
+
+
+# A direction's name: one of the eight, or the nearest of toward, away, up
+# and down tilted toward the other axis ("toward 22° up", "up 34° away").
+static func di_name(degrees: float) -> String:
+	var nearest = []
+	for i in range(Lookahead.DI_VARIANTS.size()):
+		var di = Lookahead.DI_VARIANTS[i]
+		var gap = fposmod(degrees - di[1] + 180.0, 360.0) - 180.0
+		if abs(gap) < 0.5:
+			return di[0]
+		# The first four are the main directions.
+		if i < 4 and (nearest.empty() or abs(gap) < abs(nearest[1])):
+			nearest = [di[0], gap]
+	var angle = deg2rad(degrees)
+	var tilt = ("up" if sin(angle) < 0 else "down") if nearest[0] in ["toward", "away"] else ("toward" if cos(angle) > 0 else "away")
+	return "%s %d° %s" % [nearest[0], int(round(abs(nearest[1]))), tilt]
+
+
+func _by_degrees(a: Dictionary, b: Dictionary) -> bool:
+	return a["policy"]["degrees"] < b["policy"]["degrees"]
+
+
+func _by_policy_degrees(a: Dictionary, b: Dictionary) -> bool:
+	return a["degrees"] < b["degrees"]
 
 
 # The entry of `list` (options, or {"option"} items) that is the same move as
