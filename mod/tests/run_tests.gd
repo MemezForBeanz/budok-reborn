@@ -483,6 +483,13 @@ func _test_tool_catalogue() -> void:
 	for definition in tools.definitions():
 		check(tools.has_method("_t_" + definition["name"]), "tool %s has a handler" % definition["name"])
 		check(definition["inputSchema"]["type"] == "object", "tool %s has an object input schema" % definition["name"])
+	var destructive = []
+	for definition in tools.definitions():
+		if definition["annotations"]["destructiveHint"]:
+			destructive.append(definition["name"])
+	destructive.sort()
+	check(destructive == ["forget", "start_match", "submit_character_schema", "update_setting"],
+		"only tools that remove or overwrite something are marked destructive (clients run the rest without asking): %s" % str(destructive))
 
 
 func _test_knowledge() -> void:
@@ -645,7 +652,8 @@ func _test_cli_agents() -> void:
 	spec["model"] = "gpt-5-codex"
 	var codex = CliAgent.command_line(spec)
 	check(codex["ok"] and codex["args"][0] == "exec" and "mcp_servers.budok_agent.url=http://127.0.0.1:8765/mcp?agent=abc&token=tok" in codex["args"]
-		and codex["args"].back() == "-" and "gpt-5-codex" in codex["args"], "Codex CLI gets budok's address with the token, the prompt on stdin")
+		and codex["args"].back() == "-" and "gpt-5-codex" in codex["args"] and "mcp_servers.budok_agent.default_tools_approval_mode=approve" in codex["args"]
+		and "approval_policy=never" in codex["args"], "Codex CLI gets budok's address with the token, its tools approved, the prompt on stdin")
 	var toml = PoolStringArray(["model = \"o4\"", "[mcp_servers.budok]", "command = \"python\"", "args = [\"budok_stdio.py\"]",
 		"[mcp_servers.budok.env]", "X = \"1\"", "[mcp_servers.\"yomi\"]", "url = \"http://127.0.0.1:8765/mcp\"",
 		"[mcp_servers.github]", "command = \"gh-mcp\"", "[mcp_servers.budok_agent]", "url = \"x\""]).join("\n")

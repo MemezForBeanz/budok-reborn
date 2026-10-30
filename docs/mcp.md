@@ -14,6 +14,8 @@ client tool timeouts. Supported protocol versions: `2025-06-18`, `2025-03-26` an
 
 ## Tools
 
+Every tool says it is closed-world (`openWorldHint: false`); tools that only read say `readOnlyHint: true`, and only `start_match`, `update_setting`, `forget` and `submit_character_schema` say they can remove or overwrite something (`destructiveHint: true`). Clients that ask before risky tool calls (Codex, for one) run the others without asking.
+
 | Tool | What it does |
 |---|---|
 | `get_status` | Versions, server, match (characters, controllers, open turns, last result), AI settings, schema jobs. |

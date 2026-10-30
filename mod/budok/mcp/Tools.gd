@@ -17,6 +17,10 @@ const SESSION_TAKEOVER_MS := 120000
 # What an agent budok started (ai/AgentDispatch.gd) may not do: its slot and
 # controller are set for it.
 const AGENT_BLOCKED := ["claim_slot", "release_slot", "set_controller", "start_match", "update_setting"]
+# Tools that can remove or overwrite something (a running match, a setting, a
+# memory, notes); the others only read or add, which clients such as Codex
+# run without asking when the tool says so (destructiveHint false).
+const DESTRUCTIVE := ["start_match", "update_setting", "forget", "submit_character_schema"]
 
 var runtime = null
 var _defs := []
@@ -154,7 +158,7 @@ func _add(name: String, title: String, description: String, properties: Dictiona
 		"title": title,
 		"description": description,
 		"inputSchema": schema,
-		"annotations": {"title": title, "readOnlyHint": read_only, "openWorldHint": false},
+		"annotations": {"title": title, "readOnlyHint": read_only, "destructiveHint": not read_only and name in DESTRUCTIVE, "openWorldHint": false},
 	})
 	_names[name] = true
 

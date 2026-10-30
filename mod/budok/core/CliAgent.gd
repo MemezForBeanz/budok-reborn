@@ -98,7 +98,10 @@ static func command_line(spec: Dictionary) -> Dictionary:
 			# the agent has only its own session. A value -c cannot read as TOML is
 			# taken as a plain string.
 			out["args"] = ["exec", "--skip-git-repo-check", "--json", "--sandbox", "read-only", "-c", "approval_policy=never",
-				"-c", "mcp_servers.%s.url=%s" % [CODEX_SERVER, url_with_token], "-c", "mcp_servers.%s.tool_timeout_sec=180" % CODEX_SERVER]
+				"-c", "mcp_servers.%s.url=%s" % [CODEX_SERVER, url_with_token], "-c", "mcp_servers.%s.tool_timeout_sec=180" % CODEX_SERVER,
+				# budok's tools run without asking (nobody is there to approve them);
+				# shell commands stay refused (approval_policy never, read-only sandbox).
+				"-c", "mcp_servers.%s.default_tools_approval_mode=approve" % CODEX_SERVER]
 			for name in codex_budok_servers(_read_codex_config()):
 				out["args"] += ["-c", "mcp_servers.%s.enabled=false" % name]
 			if model != "":
