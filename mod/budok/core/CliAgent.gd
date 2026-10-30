@@ -12,6 +12,8 @@ const Util = preload("res://budok/core/Util.gd")
 # their documented headless use.
 const PRESETS := [["claude", "Claude Code (Claude subscription)", "claude"], ["codex", "Codex CLI (ChatGPT subscription)", "codex"],
 	["gemini", "Gemini CLI (Google account)", "gemini"], ["custom", "Your own command", ""]]
+# The name budok's server has in the Codex CLI runs it starts.
+const CODEX_SERVER := "budok_agent"
 # Placeholders a custom command may use.
 const PLACEHOLDERS := ["{mcp_url}", "{mcp_config}", "{model}", "{prompt_file}", "{dir}"]
 
@@ -90,9 +92,15 @@ static func command_line(spec: Dictionary) -> Dictionary:
 				out["args"] += ["--model", model]
 			out["env"] = {"DISABLE_AUTOUPDATER": "1"}
 		"codex":
-			# A value -c cannot read as TOML is taken as a plain string.
+			# budok's server gets a name of its own: the player's config.toml may
+			# have a "budok" entry of its own (say the stdio bridge), which -c would
+			# merge into. Entries there that lead to budok are off for this run, so
+			# the agent has only its own session. A value -c cannot read as TOML is
+			# taken as a plain string.
 			out["args"] = ["exec", "--skip-git-repo-check", "--json", "--sandbox", "read-only", "-c", "approval_policy=never",
-				"-c", "mcp_servers.budok.url=" + url_with_token, "-c", "mcp_servers.budok.tool_timeout_sec=180"]
+				"-c", "mcp_servers.%s.url=%s" % [CODEX_SERVER, url_with_token], "-c", "mcp_servers.%s.tool_timeout_sec=180" % CODEX_SERVER]
+			for name in codex_budok_servers(_read_codex_config()):
+				out["args"] += ["-c", "mcp_servers.%s.enabled=false" % name]
 			if model != "":
 				out["args"] += ["-m", model]
 			out["args"].append("-")
@@ -120,6 +128,38 @@ static func command_line(spec: Dictionary) -> Dictionary:
 			out["args"] = words.slice(1, words.size() - 1) if words.size() > 1 else []
 		_:
 			return {"ok": false, "error": "unknown agent program %s" % str(spec.get("cli"))}
+	return out
+
+
+# The player's Codex config.toml ($CODEX_HOME, else ~/.codex), or "".
+static func _read_codex_config() -> String:
+	var home = OS.get_environment("CODEX_HOME")
+	if home == "":
+		var user = OS.get_environment("USERPROFILE" if OS.get_name() == "Windows" else "HOME")
+		home = user.plus_file(".codex") if user != "" else ""
+	var text = Util.read_text(home.plus_file("config.toml")) if home != "" else null
+	return text if text is String else ""
+
+
+# The MCP servers in a Codex config.toml that lead to budok: named budok, or
+# running its bridge or pointing at its port.
+static func codex_budok_servers(toml: String) -> Array:
+	var out = []
+	var current = ""
+	var header = RegEx.new()
+	header.compile("^\\s*\\[\\s*mcp_servers\\.(\"?)([A-Za-z0-9_-]+)\\1\\s*(\\.[^\\]]*)?\\]")
+	for line in toml.split("\n"):
+		var stripped = line.strip_edges()
+		if stripped.begins_with("["):
+			var found = header.search(stripped)
+			current = found.get_string(2) if found != null and found.get_string(3) == "" else ""
+			if current != "" and current != CODEX_SERVER and current.to_lower().find("budok") != -1 and not (current in out):
+				out.append(current)
+			continue
+		if current != "" and current != CODEX_SERVER and not (current in out):
+			var lower = stripped.to_lower()
+			if lower.find("budok_stdio") != -1 or lower.find(":8765") != -1:
+				out.append(current)
 	return out
 
 

@@ -189,7 +189,10 @@ func _start(slot: String, mode: String, restarts: int, resumed: bool) -> void:
 		Util.ensure_dir(path.get_base_dir())
 		Util.write_text(path, line["files"][path])
 	var limit = Util.as_int(runtime.config.get_value("turns.timeout_s." + mode, 0))
-	Util.write_text(dir.plus_file("prompt.txt"), Prompts.agent_prompt(runtime, slot, mode, limit, resumed))
+	var prompt = Prompts.agent_prompt(runtime, slot, mode, limit, resumed)
+	if cli == "codex":
+		prompt += "\n\nbudok's tools are the ones of the MCP server named %s; use no other budok server." % CliAgent.CODEX_SERVER
+	Util.write_text(dir.plus_file("prompt.txt"), prompt)
 	record["log"] = ProjectSettings.globalize_path(dir.plus_file("agent.log"))
 	# The previous run's log is kept next to it (why it stopped).
 	var logs = Directory.new()

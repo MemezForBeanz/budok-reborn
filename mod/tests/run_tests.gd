@@ -644,8 +644,13 @@ func _test_cli_agents() -> void:
 	spec["cli"] = "codex"
 	spec["model"] = "gpt-5-codex"
 	var codex = CliAgent.command_line(spec)
-	check(codex["ok"] and codex["args"][0] == "exec" and "mcp_servers.budok.url=http://127.0.0.1:8765/mcp?agent=abc&token=tok" in codex["args"]
+	check(codex["ok"] and codex["args"][0] == "exec" and "mcp_servers.budok_agent.url=http://127.0.0.1:8765/mcp?agent=abc&token=tok" in codex["args"]
 		and codex["args"].back() == "-" and "gpt-5-codex" in codex["args"], "Codex CLI gets budok's address with the token, the prompt on stdin")
+	var toml = PoolStringArray(["model = \"o4\"", "[mcp_servers.budok]", "command = \"python\"", "args = [\"budok_stdio.py\"]",
+		"[mcp_servers.budok.env]", "X = \"1\"", "[mcp_servers.\"yomi\"]", "url = \"http://127.0.0.1:8765/mcp\"",
+		"[mcp_servers.github]", "command = \"gh-mcp\"", "[mcp_servers.budok_agent]", "url = \"x\""]).join("\n")
+	check(CliAgent.codex_budok_servers(toml) == ["budok", "yomi"],
+		"budok entries of the player's Codex config are found (by name, bridge or port), others are not: %s" % str(CliAgent.codex_budok_servers(toml)))
 	spec["cli"] = "gemini"
 	var gemini = CliAgent.command_line(spec)
 	var settings = JSON.parse(gemini["files"][gemini["env"]["GEMINI_CLI_SYSTEM_SETTINGS_PATH"]]).result
