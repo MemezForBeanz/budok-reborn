@@ -165,6 +165,20 @@ func _take_turn(slot: String, token: String) -> void:
 	if view.empty() or view["turn_token"] != token:
 		_busy[slot] = ""
 		return
+	# A CLI agent (agents.for_bots) plays this turn over MCP: only the turn limit
+	# is kept here, and the engine picks when no agent could be started.
+	if runtime.agents.thinks_for(slot):
+		runtime.agents.ensure(slot)
+		if runtime.agents.ready(slot):
+			var limit = _deadline(token)
+			if limit > 0:
+				_watch(slot, token, limit)
+		else:
+			yield(_play_engine_pick(slot, token, "no CLI agent: %s" % runtime.agents.agents.get(slot, {}).get("error", "not started")), "completed")
+		stats["turns"] += 1
+		if _busy[slot] == token:
+			_busy[slot] = ""
+		return
 	if _system_cache[slot] == "":
 		_system_cache[slot] = Prompts.play_system(runtime, slot)
 	var cfg = runtime.config.get_value("ai.play", {})
@@ -254,7 +268,7 @@ func _on_match_ended(result) -> void:
 	if not bool(runtime.config.get_value("ai.play.reflect_after_match", true)) or not bool(runtime.config.get_value("memory.enabled", true)):
 		return
 	for slot in ["p1", "p2"]:
-		if runtime.matches.controllers.get(slot) in CONTROLLERS:
+		if runtime.matches.controllers.get(slot) in CONTROLLERS and not runtime.agents.thinks_for(slot):
 			_reflect(slot, result, _notes[slot].duplicate())
 
 

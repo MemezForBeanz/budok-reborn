@@ -145,6 +145,49 @@ static func play_match_prompt(runtime, slot: String) -> String:
 	]).join("\n")
 
 
+# For a command-line agent budok started to play `slot` (ai/AgentDispatch.gd):
+# mode mcp (play it like a chatbot would), ai (decide alone, no look_ahead) or
+# tandem (lead the decision core: look_ahead every turn, then decide).
+# resumed: an earlier run for this match ended.
+static func agent_prompt(runtime, slot: String, mode: String, turn_limit_s: int, resumed: bool = false) -> String:
+	var names = {"mcp": "chatbot", "ai": "AI chat model", "tandem": "tandem"}
+	var loop = {
+		"mcp": ("Loop: wait_for_turn {\"detail\": \"compact\"} until status is your_turn, then decide (simulate one or two risky moves, "
+			+ "or look_ahead for a full check on the engine), then submit_action with the turn_token (it waits for the outcome)."),
+		"ai": ("Loop: wait_for_turn {\"detail\": \"compact\"} until status is your_turn, then decide from the situation, the notes "
+			+ "(describe_character) and the history, simulate up to 3 moves when unsure, and submit_action with the turn_token. "
+			+ "look_ahead is not available in this mode: you decide alone."),
+		"tandem": ("You lead budok's decision core, and you are the final decision maker. Loop: wait_for_turn {\"detail\": \"compact\"} "
+			+ "until status is your_turn. On every turn with a real choice call look_ahead first (name 2-4 candidate moves in `moves`, or none "
+			+ "to let the core pick); read recommended, close_calls and each move's worst case; then decide yourself and submit_action with "
+			+ "the move's action, data and extra exactly as listed."),
+	}
+	var parts = [
+		"budok started you to play %s in YOMI Hustle on the player's computer, in %s mode. You play through budok's tools (the budok MCP server) only." % [
+			slot, names.get(mode, mode)],
+		play_system(runtime, slot),
+		"# How to play",
+		loop.get(mode, loop["mcp"]),
+	]
+	if turn_limit_s > 0:
+		parts.append("Each turn has a limit of %d s: if you have not locked in a move by then, budok's engine plays its own pick for you." % turn_limit_s)
+	parts += [
+		"# Rules",
+		("- Your slot (%s) and its controller are set for you: never call claim_slot, release_slot, set_controller, start_match or "
+			+ "update_setting.") % slot,
+		"- Keep each turn's reasoning short: a match has many turns. Get move notes with describe_character when you need them.",
+		"- When wait_for_turn says match_over, save the 1-3 most useful lessons with remember (if any) and stop.",
+		"# The player can talk to you",
+		("The player watches you in budok's agent window and may send you messages. They arrive in any tool result as operator_messages "
+			+ "(and wait_for_turn returns early with status operator_message when one comes while you wait). Answer each one with "
+			+ "operator_reply, briefly, follow what they ask about how to play, then carry on."),
+	]
+	if resumed:
+		parts.append("An earlier run of yours ended during this match: carry on from the current turn (call wait_for_turn).")
+	parts.append("Start now: call wait_for_turn.")
+	return PoolStringArray(parts).join("\n\n")
+
+
 # For a notes agent with its own context: the headless Claude Code agent budok
 # starts, or a second chat running the notes_worker prompt.
 # headless: budok started this agent itself (core/NotesAgent.gd) and it stops

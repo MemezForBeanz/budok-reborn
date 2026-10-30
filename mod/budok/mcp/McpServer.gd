@@ -118,6 +118,12 @@ func _handle_post(conn_id: int, req: Dictionary) -> void:
 		_respond_json(conn_id, 404, _rpc_error(null, -32001, "session not found; reinitialize"), headers)
 		return
 	sessions[sid]["last_seen_ms"] = Util.now_ms()
+	# An agent budok started has its ticket in the address (ai/AgentDispatch.gd).
+	var ticket = str(req["query"].get("agent", ""))
+	if ticket != "" and not sessions[sid].has("agent") and runtime.agents != null:
+		var bound = runtime.agents.bind(ticket, sid)
+		if not bound.empty():
+			sessions[sid]["agent"] = bound
 	var requests = []
 	for msg in messages:
 		if not (msg is Dictionary) or msg.get("jsonrpc") != "2.0":
@@ -232,11 +238,20 @@ func _call_tool(id, params: Dictionary, sid: String):
 	if not (arguments is Dictionary):
 		arguments = {}
 	emit_signal("activity", name)
+	var entry = runtime.agents.on_call(sid, name, arguments) if runtime.agents != null else {}
+	var started = Util.now_ms()
 	var raw = tools.call_tool(name, arguments, sid)
 	if raw is GDScriptFunctionState:
 		raw = yield(raw, "completed")
 	if not (raw is Dictionary):
 		raw = {"ok": false, "error": "tool returned no result"}
+	if runtime.agents != null:
+		runtime.agents.on_result(entry, raw, Util.now_ms() - started)
+		# The player's messages from the agent window ride along with any result.
+		var messages = runtime.agents.take_messages(sid)
+		if not messages.empty():
+			raw["operator_messages"] = messages
+			raw["operator_note"] = "The player sent you these messages: answer each with operator_reply and do what they ask."
 	var is_error = raw.has("error") and raw.get("ok", false) != true
 	var result = {"content": [{"type": "text", "text": Util.json_str(raw)}], "isError": is_error}
 	if str(sessions.get(sid, {}).get("protocol", "")) >= "2025-06-18":

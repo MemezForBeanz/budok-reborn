@@ -27,6 +27,7 @@ const Evidence = preload("res://budok/ai/Evidence.gd")
 const LookAheadReport = preload("res://budok/ai/LookAheadReport.gd")
 const Simulator = preload("res://budok/core/Simulator.gd")
 const AutoPilot = preload("res://budok/ai/AutoPilot.gd")
+const CliAgent = preload("res://budok/core/CliAgent.gd")
 
 var failures := 0
 var checks := 0
@@ -48,6 +49,7 @@ func _init() -> void:
 	_test_combo_helpers()
 	_test_previews()
 	_test_chat_fallbacks()
+	_test_cli_agents()
 	_test_talk_and_playbook()
 	print("%d checks, %d failures" % [checks, failures])
 	quit(failures)
@@ -626,3 +628,37 @@ func _test_chat_fallbacks() -> void:
 	var analysis = {"engine": {"best": "Slash"}, "candidates": [{"option": {"label": "Kick", "action": "Kick"}}, {"option": slash}]}
 	check(DecisionCore.pick_of(analysis) == slash and DecisionCore.pick_of({"candidates": []}) == null,
 		"the engine's pick is the analysis's best move, if any")
+
+
+func _test_cli_agents() -> void:
+	var spec = {"command": "/bin/claude", "model": "", "url": "http://127.0.0.1:8765/mcp?agent=abc", "token": "tok", "dir": "user://budok/agents/p1",
+		"tools": ["wait_for_turn", "submit_action"]}
+	spec["cli"] = "claude"
+	var claude = CliAgent.command_line(spec)
+	check(claude["ok"] and claude["args"].slice(0, 1) == ["-p", "--strict-mcp-config"] and "--output-format" in claude["args"]
+		and claude["args"][5] == "mcp__budok__wait_for_turn mcp__budok__submit_action" and claude["env"].get("DISABLE_AUTOUPDATER") == "1",
+		"Claude Code runs headless with only budok's tools and stream-json output")
+	var config = JSON.parse(claude["files"].values()[0]).result
+	check(config["mcpServers"]["budok"]["url"].ends_with("?agent=abc") and config["mcpServers"]["budok"]["headers"]["Authorization"] == "Bearer tok",
+		"its MCP config carries the agent's ticket and the token")
+	spec["cli"] = "codex"
+	spec["model"] = "gpt-5-codex"
+	var codex = CliAgent.command_line(spec)
+	check(codex["ok"] and codex["args"][0] == "exec" and "mcp_servers.budok.url=http://127.0.0.1:8765/mcp?agent=abc&token=tok" in codex["args"]
+		and codex["args"].back() == "-" and "gpt-5-codex" in codex["args"], "Codex CLI gets budok's address with the token, the prompt on stdin")
+	spec["cli"] = "gemini"
+	var gemini = CliAgent.command_line(spec)
+	var settings = JSON.parse(gemini["files"][gemini["env"]["GEMINI_CLI_SYSTEM_SETTINGS_PATH"]]).result
+	check(gemini["ok"] and settings["mcpServers"]["budok"]["trust"] and "--allowed-mcp-server-names" in gemini["args"],
+		"Gemini CLI gets budok as a trusted MCP server from its settings file")
+	spec["model"] = "bad model; rm"
+	check(not CliAgent.command_line(spec)["ok"], "a model name with spaces or shell characters is refused")
+	check(CliAgent.split_words("tool --flag \"a b\" {mcp_url}") == ["tool", "--flag", "a b", "{mcp_url}"], "a custom command splits into words, quotes kept together")
+	check(CliAgent._quoted("50%\"x\\") == "\"50%%\\\"x\\\\\"", "Windows launcher arguments are quoted and escaped")
+	var said = [CliAgent.text_of("{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"hi\"}, {\"type\": \"tool_use\"}]}}"),
+		CliAgent.text_of("{\"type\": \"item.completed\", \"item\": {\"type\": \"agent_message\", \"text\": \"codex says\"}}"),
+		CliAgent.text_of("{\"type\": \"message\", \"role\": \"assistant\", \"content\": \"gem\", \"delta\": true}"),
+		CliAgent.text_of("Error: not logged in"), CliAgent.text_of("{\"type\": \"user\"}"),
+		CliAgent.text_of("{\"type\": \"result\", \"subtype\": \"success\", \"num_turns\": 12}")]
+	check(said[0]["text"] == "hi" and said[1]["text"] == "codex says" and said[2]["delta"] and said[3]["kind"] == "log" and said[4].empty()
+		and said[5]["text"] == "the run ended after 12 turns", "agent logs are read for Claude Code, Codex CLI and Gemini CLI: %s" % Util.json_str(said))

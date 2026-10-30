@@ -198,6 +198,40 @@ Which models:
 
 budok 1.3.0 kept one decision model under `ai.decide`; it moves to `ai.core` by itself.
 
+## agents (Play tab, CLI agents)
+
+budok can start a command-line agent itself, with your own login of that program (a Claude, ChatGPT or
+Google subscription instead of an API key), to play a slot. It runs headless, without a window, gets the
+prompt for its slot's mode and plays through budok's tools only. Its MCP address carries a ticket that
+ties its session to that slot: it plays it without claiming it (a Tandem slot stays Tandem), and it may
+not claim slots, change controllers, start matches or change settings. If it exits while its match goes
+on, it is started again (three times at most). Its output is in `user://budok/agents/<slot>/agent.log`
+(the previous run's in `agent.prev.log`).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `agents.for_mcp` | `true` | Start an agent for a slot set to Chatbot (MCP) that no chatbot of yours claims (it waits 3 s after the match starts). If one of your chatbots claims the slot later, the agent steps aside. Turn it off to keep Chatbot slots for your own apps. |
+| `agents.for_bots` | `false` | The agent thinks for slots set to AI: chat model or AI: tandem, instead of the API chat model (Models tab). In Tandem it calls `look_ahead` every turn and decides; at the turn limit (`turns.timeout_s`) the engine plays its pick, as for any chat-model bot. |
+| `agents.cli` | `claude` | `claude` (Claude Code, `claude -p`), `codex` (Codex CLI, `codex exec`), `gemini` (Gemini CLI) or `custom`. Claude Code is the tested one; Codex and Gemini follow their documented headless use (Codex gets budok's address as `-c mcp_servers.budok.url=...` with a read-only sandbox; Gemini a settings file with budok as a trusted server). |
+| `agents.model` | `""` | Model for the agent (`--model` / `-m`); empty uses the program's default. |
+| `agents.command` | `""` | The program or its full path; empty finds it in `PATH` and the usual install folders. |
+| `agents.custom_command` | `""` | For `custom`: the command line, using `{mcp_url}` (budok's address with the ticket and token), `{mcp_config}` (a Claude-style MCP config file), `{model}`, `{prompt_file}` and `{dir}`. The prompt also comes in on stdin. |
+
+None of these can be changed over MCP. The prompts per mode:
+
+- **Chatbot** (`mcp`): play the slot with `wait_for_turn`, `simulate` / `look_ahead` as it sees fit, and `submit_action`.
+- **AI chat model** (`ai`): decide alone, `simulate` up to three moves; `look_ahead` is not available.
+- **Tandem**: call `look_ahead` first on every turn with a real choice, read the recommendation, close calls
+  and worst cases, then decide and submit the move as listed. The agent is the final decision maker.
+
+### The agent window (F9, or the corner "agent" button)
+
+A window you can drag and resize, one view per slot: your messages, the agent's replies, its own words (from
+its log) and every tool call it makes with how it went. Type a message to the agent (or chatbot) playing that
+slot: it gets it with its next tool call as `operator_messages` (a `wait_for_turn` in progress returns early),
+and answers with `operator_reply`. Start and Stop buttons start or stop that slot's agent; "Other calls" shows
+calls from sessions that play no slot.
+
 ## misc (Play tab, Misc)
 
 | Key | Default | Meaning |
@@ -214,8 +248,6 @@ budok 1.3.0 kept one decision model under `ai.decide`; it moves to `ai.core` by 
 | `schemas.auto.enabled` | `true` | Write missing character notes automatically (Characters tab → Automatic notes). |
 | `schemas.auto.use_agent` | `true` | A separate notes agent writes them, in its own context: budok starts Claude Code in the background (`claude -p`, with your Claude login, only budok's notes tools allowed, output in `user://budok/agent/agent.log`) and it exits when the queue is empty. A second chat running the `notes_worker` prompt counts as a notes agent too, and budok then starts none. |
 | `schemas.auto.agent_command` | `claude` | The Claude Code command or its full path. budok also looks in the usual install folders (`~/.local/bin`, npm's global folder, Homebrew), since a game started by Steam may not see your shell's `PATH`. Not changeable over MCP. |
-
-On Windows the notes agent starts hidden (through `wscript`, so no terminal window opens). If it stops or never connects, the notes status (Play tab, and `get_status`) shows the end of its log, `user://budok/agent/agent.log`: on Windows that is `%APPDATA%\YourOnlyMoveIsHUSTLE\budok\agent\agent.log`. Claude Code on Windows needs Git for Windows; if its log says it cannot find git-bash, set `CLAUDE_CODE_GIT_BASH_PATH`.
 | `schemas.auto.agent_model` | `""` | Model for the notes agent (`--model`); empty uses Claude Code's default. |
 | `schemas.auto.use_api` | `true` | The in-game AI writes them with your API key (settings `ai.annotate`), side by side with the notes agent. |
 | `schemas.auto.use_player` | `false` | Hand jobs to the chatbot that is playing, before its first move, but only when no notes agent is available. |
@@ -223,8 +255,10 @@ On Windows the notes agent starts hidden (through `wscript`, so no terminal wind
 | `schemas.auto.match_start` | `true` | When a match starts and its character or opponent has no notes, write them first; bots wait for them before their first move (their turn timer waits too). |
 | `source_access.enabled` / `max_file_bytes` | `true` / `200000` | Read-only `res://` access for bots. |
 | `automation.script` | `""` | GDScript with `func run(runtime)` started after boot. |
-| `ui.show_button` / `toggle_key` / `show_on_start` | `true` / `F8` / `false` | Corner button, overlay key, open on start. |
+| `ui.show_button` / `toggle_key` / `agent_window_key` / `show_on_start` | `true` / `F8` / `F9` / `false` | Corner buttons (budok and agent), overlay key, agent window key, open on start. |
 | `logging.match_logs` | `true` | Write `user://budok/matches/<time>_<p1>_vs_<p2>.json` after each match. |
 | `memory.enabled` | `true` | Bots may save and recall memories (`user://budok/memory/<subject>.json`, one file per character, matchup or `general`). |
 | `memory.shown_per_match` | `6` | Memories shown at match start (in `start_match`, the first turn and the token-mode prompt). |
 | `memory.max_per_subject` | `100` | Oldest memories of a subject are dropped past this. |
+
+On Windows the notes agent and the CLI agents that play start hidden (through `wscript`, so no terminal window opens). If it stops or never connects, the notes status (Play tab, and `get_status`) shows the end of its log, `user://budok/agent/agent.log`: on Windows that is `%APPDATA%\YourOnlyMoveIsHUSTLE\budok\agent\agent.log`. Claude Code on Windows needs Git for Windows; if its log says it cannot find git-bash, set `CLAUDE_CODE_GIT_BASH_PATH`.

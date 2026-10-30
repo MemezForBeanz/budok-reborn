@@ -80,6 +80,14 @@
     "max_ticks": 120,
     "reuse_previews": true
   },
+  "agents": {
+    "for_mcp": true,
+    "for_bots": false,
+    "cli": "claude",
+    "command": "",
+    "model": "",
+    "custom_command": ""
+  },
   "schemas": {
     "registry_enabled": false,
     "registry_url": "",
@@ -114,6 +122,7 @@
   "ui": {
     "show_button": true,
     "toggle_key": "F8",
+    "agent_window_key": "F9",
     "show_on_start": false
   },
   "logging": {

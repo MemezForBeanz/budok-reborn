@@ -54,6 +54,23 @@ with the normal game UI. `start_match` hands it the start of budok's playbook (h
 a move); the `play_match` MCP prompt gives it the whole playbook, the rules and both characters' notes. See
 [docs/mcp.md](docs/mcp.md) for every tool.
 
+### Or let budok start the agent for you (your subscription)
+
+budok can start **Claude Code**, **Codex CLI** or **Gemini CLI** itself, with your own login of it, so a
+match needs no chat app at all (Play tab, *CLI agents*):
+
+- a slot set to **Chatbot (MCP)** that no chatbot of yours claims gets an agent when the match starts
+  (turn this off to keep those slots for your own apps; if your app claims the slot later, the agent
+  steps aside);
+- with *It plays AI chat model and Tandem slots* on, the agent is the chat model of those slots: in
+  Tandem it calls `look_ahead` on every turn and makes the final decision.
+
+Each agent gets the prompt for its slot's mode and a ticket that ties it to that slot, so it plays the
+slot as set and cannot switch it to MCP or claim another. Watch it and talk to it in the **agent window**
+(F9, or the corner *agent* button): its replies, its own words and every tool call it makes, with a
+message box to ask it something or tell it how to play. Claude Code is the tested one; for anything else
+there's a custom command. See [docs/settings.md](docs/settings.md#agents-play-tab-cli-agents).
+
 ## Let the mod play by itself (token mode)
 
 In the **Models** tab, each role has its provider, model and key together:

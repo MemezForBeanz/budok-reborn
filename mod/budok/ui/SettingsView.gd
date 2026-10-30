@@ -7,6 +7,7 @@ extends Reference
 # model, the notes writer and the decision core, each with its key next to it.
 
 const Util = preload("res://budok/core/Util.gd")
+const CliAgent = preload("res://budok/core/CliAgent.gd")
 const CONTROLLERS := [["human", "You"], ["mcp", "Chatbot (MCP)"], ["ai", "AI: chat model"], ["decision", "AI: decision models"],
 	["tandem", "AI: tandem (chat + decision)"]]
 const CHAT_PROVIDERS := [["anthropic", "Anthropic"], ["openai", "OpenAI"], ["openrouter", "OpenRouter"], ["local", "Local server (Ollama...)"]]
@@ -120,14 +121,23 @@ func _readiness_lines(status: Dictionary) -> Array:
 	for slot in ["p1", "p2"]:
 		var controller = str(status["match"]["controllers"][slot])
 		var needs = []
-		if controller in ["ai", "tandem"]:
+		var agents = status.get("agents", {})
+		if controller in ["ai", "tandem"] and agents.get("for_bots", false):
+			needs.append("played by %s (CLI agent)" % CliAgent.label(str(agents.get("cli", "claude"))))
+		elif controller in ["ai", "tandem"]:
 			needs.append("chat model %s: %s" % [chat["model"], "ready" if chat["has_key"] else "needs an API key (Models tab)"])
 		if controller in ["decision", "tandem"] and core["parallel_requests"] > 0:
 			needs.append("decision core: %d parallel requests ready" % core["parallel_requests"])
 		elif controller in ["decision", "tandem"]:
 			needs.append("decision core: no decision model ready (Models tab, Decision core: add one with a model and an API key)")
-		if controller == "mcp":
-			needs.append("claimed by a chatbot" if status["match"]["claimed_by"][slot] else "waiting for a chatbot to claim it (Chatbots tab)")
+		var agent = agents.get("agents", {}).get(slot, {})
+		if agent.get("state", "") in ["starting", "running"]:
+			needs.append("CLI agent %s" % ("playing" if agent.get("connected", false) else "starting"))
+		elif agent.get("error", "") != "" and (controller == "mcp" or agents.get("for_bots", false)):
+			needs.append("CLI agent: " + str(agent["error"]))
+		elif controller == "mcp":
+			needs.append("claimed by a chatbot" if status["match"]["claimed_by"][slot] else (
+				"a CLI agent starts with the match" if agents.get("for_mcp", false) else "waiting for a chatbot to claim it (Chatbots tab)"))
 		if not needs.empty():
 			lines.append("%s %s: %s" % [slot.to_upper(), _label_of(CONTROLLERS, controller), PoolStringArray(needs).join("; ")])
 	return lines
@@ -163,7 +173,25 @@ func _play_tab() -> Control:
 	var modes = _section(box, "What the modes do")
 	modes.add_child(_note("You: you play it. Chatbot: a connected chatbot (Claude Desktop, Claude Code...) plays it once it claims the slot. "
 		+ "AI chat model: the chat model from the Models tab plays it with your API key. AI decision models: the decision core plays it, "
-		+ "simulating your best moves many turns ahead. AI tandem: the chat model plays it and asks the decision core to look ahead for it."))
+		+ "simulating your best moves many turns ahead. AI tandem: the chat model plays it and asks the decision core to look ahead for it. "
+		+ "With CLI agents (below), budok starts one to play a Chatbot slot nobody claims, or to be the chat model of AI and Tandem slots."))
+	box.add_child(_header("CLI agents (your subscription)"))
+	box.add_child(_note("budok can start Claude Code, Codex CLI or Gemini CLI itself, with your own login of it, to play a slot: it "
+		+ "gets the prompt for that slot's mode and plays through budok's tools only. Watch it and talk to it in the agent window (F9)."))
+	_field(box, "agents.for_mcp", "Start one for Chatbot slots nobody claims", "bool")
+	_field(box, "agents.for_bots", "It plays AI chat model and Tandem slots", "bool")
+	var presets = []
+	for preset in CliAgent.PRESETS:
+		presets.append([preset[0], preset[1]])
+	_field(box, "agents.cli", "Program", "option", presets)
+	var agents_more = _section(box, "More CLI agent settings")
+	_field(agents_more, "agents.model", "Model (empty: its default)", "string")
+	_field(agents_more, "agents.command", "Command or full path (empty: find it)", "string")
+	_field(agents_more, "agents.custom_command", "Your own command", "string")
+	agents_more.add_child(_note("Your own command may use {mcp_url}, {mcp_config} (a Claude-style MCP config file), {model} and {prompt_file}; "
+		+ "the prompt also comes in on stdin. Not changeable over MCP."))
+	_field(agents_more, "ui.agent_window_key", "Agent window key", "string")
+	box.add_child(_buttons([["Agent window", "_on_agent_window"], ["Stop agents", "_on_stop_agents"]]))
 	var turns = _section(box, "Turn rules")
 	_field(turns, "turns.forced_turns", "Auto-hold when it is the only move", "option",
 		[["never", "Never"], ["skip_unless_hurt", "Unless hurt (keeps DI)"], ["always", "Always"]])
@@ -457,6 +485,16 @@ func _endpoints_value() -> Array:
 
 
 # --- actions ---
+
+func _on_agent_window() -> void:
+	if Util.valid(runtime.panel) and runtime.panel.has_method("toggle_agents"):
+		runtime.panel.toggle_agents()
+
+
+func _on_stop_agents() -> void:
+	runtime.agents.stop_all()
+	refresh_status()
+
 
 func _on_save() -> void:
 	_save_fields()

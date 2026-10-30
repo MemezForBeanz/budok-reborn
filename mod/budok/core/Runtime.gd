@@ -24,6 +24,7 @@ const AutoPilot = preload("res://budok/ai/AutoPilot.gd")
 const DecisionCore = preload("res://budok/ai/DecisionCore.gd")
 const DecisionPilot = preload("res://budok/ai/DecisionPilot.gd")
 const Annotator = preload("res://budok/ai/Annotator.gd")
+const AgentDispatch = preload("res://budok/ai/AgentDispatch.gd")
 const OverlayPanel = preload("res://budok/ui/Panel.gd")
 const ModMenuHook = preload("res://budok/ui/ModMenuHook.gd")
 const OptionsHook = preload("res://budok/ui/OptionsHook.gd")
@@ -49,6 +50,7 @@ var core = null
 var decider = null
 var annotator = null
 var schema_jobs = null
+var agents = null
 var panel = null
 var mod_menu = null
 var options_menu = null
@@ -89,6 +91,8 @@ func _ready() -> void:
 	annotator.setup(self, llm)
 	schema_jobs = _add(SchemaJobs.new(), "SchemaJobs")
 	schema_jobs.setup(self)
+	agents = _add(AgentDispatch.new(), "Agents")
+	agents.setup(self)
 	mcp = _add(McpServer.new(), "Mcp")
 	mcp.setup(self)
 	restart_server()
@@ -152,6 +156,7 @@ func status() -> Dictionary:
 		"annotation_jobs": annotator.jobs.values(),
 		"schema_jobs": schema_jobs.summary(),
 		"notes_agent": schema_jobs.agent_status(),
+		"agents": agents.status(),
 	}
 
 

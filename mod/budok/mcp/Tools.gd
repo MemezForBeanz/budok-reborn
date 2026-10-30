@@ -14,6 +14,9 @@ const SETTING_PREFIXES := ["controllers.", "turns.", "simulation.", "ai.play.", 
 # Decision-core endpoints carry keys, so they are never changed over MCP.
 const SETTING_BLOCKLIST := ["api_key", "base_url", "auth_token", "agent_command", "endpoints"]
 const SESSION_TAKEOVER_MS := 120000
+# What an agent budok started (ai/AgentDispatch.gd) may not do: its slot and
+# controller are set for it.
+const AGENT_BLOCKED := ["claim_slot", "release_slot", "set_controller", "start_match", "update_setting"]
 
 var runtime = null
 var _defs := []
@@ -34,6 +37,10 @@ func has_tool(name: String) -> bool:
 
 
 func call_tool(name: String, args: Dictionary, sid: String):
+	var agent = runtime.agents.session_info(sid) if runtime.agents != null else {}
+	if not agent.empty() and (name in AGENT_BLOCKED or (name == "look_ahead" and agent["mode"] == "ai")):
+		return {"ok": false, "error": ("budok started you to play %s in %s mode, so %s is not for you: your slot and controller are set. Play it "
+			+ "with wait_for_turn%s and submit_action.") % [agent["slot"], agent["mode"], name, ", simulate" if agent["mode"] == "ai" else ", look_ahead"]}
 	return call("_t_" + name, args, sid)
 
 
@@ -132,6 +139,8 @@ func _define() -> void:
 			"description": "Workers only: wait up to this long for a character to come up (default 0, capped by mcp.max_wait_s)."}}, [], true)
 	_add("finish_schema_task", "Finish schema task", "End your schema task early: done, or skipped: true to hand it back. Tasks also finish by themselves once every move and the summary have notes.",
 		{"character": {"type": "string"}, "skipped": {"type": "boolean"}}, [])
+	_add("operator_reply", "Reply to the player", "Answer a message the player sent you from budok's agent window (operator_messages in a tool result). "
+		+ "It appears in that window.", {"text": {"type": "string", "description": "Your answer, short."}}, ["text"])
 	_add("update_setting", "Update setting", "Change one setting under controllers.*, turns.*, simulation.*, ai.play.*, ai.annotate.*, ai.decide.*, ai.core.* (not its endpoints), schemas.auto.* or misc.* (no keys or URLs).",
 		{"path": {"type": "string"}, "value": {}}, ["path", "value"])
 
@@ -352,12 +361,25 @@ func _t_set_controller(args: Dictionary, _sid: String) -> Dictionary:
 
 func _t_claim_slot(args: Dictionary, sid: String) -> Dictionary:
 	var slot = str(args.get("slot", ""))
-	var force = bool(args.get("force", false)) or _owner_gone(runtime.matches.owners.get(slot, ""), sid)
+	var owner = str(runtime.matches.owners.get(slot, ""))
+	var force = bool(args.get("force", false)) or _owner_gone(owner, sid)
+	# A chatbot of the player's takes a slot from an agent budok started for it.
+	if owner != "" and runtime.agents.session_info(owner).get("slot", "") == slot:
+		runtime.agents.give_up_slot(slot)
+		force = true
 	var result = runtime.matches.claim(slot, sid, force)
 	if result.get("ok", false):
 		runtime.schema_jobs.on_claimed(sid)
 		_add_schema_task(result, sid)
 	return result
+
+
+func _t_operator_reply(args: Dictionary, sid: String) -> Dictionary:
+	var text = str(args.get("text", "")).strip_edges()
+	if text == "":
+		return {"ok": false, "error": "text is empty"}
+	runtime.agents.reply(sid, text)
+	return {"ok": true}
 
 
 func _t_release_slot(args: Dictionary, sid: String) -> Dictionary:
@@ -374,7 +396,15 @@ func _t_wait_for_turn(args: Dictionary, sid: String):
 	var held = yield(_hold_for_notes(sid, timeout_s), "completed")
 	if not held.empty():
 		return held
-	var waited = yield(runtime.matches.wait_turn(slot["slot"], timeout_s), "completed")
+	# Waits in short steps, so a message from the player ends the wait.
+	var deadline = Util.now_ms() + int(timeout_s * 1000.0)
+	var waited = {}
+	while true:
+		if runtime.agents.has_messages(sid):
+			return {"ok": true, "status": "operator_message", "message": "the player sent you a message (operator_messages); answer with operator_reply, then call wait_for_turn again"}
+		waited = yield(runtime.matches.wait_turn(slot["slot"], clamp((deadline - Util.now_ms()) / 1000.0, 0.1, 1.0)), "completed")
+		if waited["status"] != "waiting" or Util.now_ms() >= deadline:
+			break
 	if waited["status"] != "your_turn":
 		waited["ok"] = true
 		_add_schema_task(waited, sid)
@@ -447,8 +477,10 @@ func _t_submit_action(args: Dictionary, sid: String):
 		if owner_check.has("error"):
 			yield(runtime.get_tree(), "idle_frame")
 			return owner_check
+	var agent = runtime.agents.session_info(sid)
+	var source = ("agent:%s" % agent["mode"]) if not agent.empty() else ("mcp:%s" % sid.substr(0, 8))
 	var result = runtime.matches.submit(str(args.get("turn_token", "")), str(args.get("action", "")),
-		args.get("data"), args.get("extra", {}), "mcp:%s" % sid.substr(0, 8))
+		args.get("data"), args.get("extra", {}), source)
 	if result["ok"] and str(args.get("say", "")).strip_edges() != "":
 		var said = runtime.speech.say(turn["slot"], str(args["say"]))
 		if not said["ok"]:
@@ -578,6 +610,12 @@ func _t_update_setting(args: Dictionary, _sid: String) -> Dictionary:
 func _slot(args: Dictionary, sid: String, must_control: bool = true) -> Dictionary:
 	var matches = runtime.matches
 	var slot = str(args.get("slot", ""))
+	# An agent budok started plays its own slot, whatever its controller.
+	var agent = runtime.agents.session_info(sid) if runtime.agents != null else {}
+	if not agent.empty():
+		if slot != "" and slot != agent["slot"] and must_control:
+			return {"ok": false, "error": "you play %s only" % agent["slot"]}
+		return {"slot": agent["slot"] if slot == "" or must_control else slot}
 	if slot == "":
 		var mine = matches.slots_of(sid)
 		if mine.size() == 1:

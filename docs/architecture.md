@@ -109,6 +109,25 @@ state, the fighter turns to face away (`CharState`), and the aim pads turn with 
 flips any reversible state; the panel's Reverse button also needs the state's `flip_allowed()`, so
 budok offers (and the solver replays) a reversed move only where both hold.
 
+## CLI agents
+
+`ai/AgentDispatch.gd` starts a command-line agent (`core/CliAgent.gd`: Claude Code, Codex CLI, Gemini CLI or
+a custom command) for slots that want one: a Chatbot slot nobody claims (`agents.for_mcp`), or an AI chat
+model or Tandem slot whose chat model is the agent (`agents.for_bots`). It writes the agent's prompt for that
+mode (`Prompts.agent_prompt`) and its MCP config, launches it headless (stdin from the prompt, output to its
+log; on Windows through `wscript`, hidden), and checks on it every second: an agent that has not connected
+in 90 s is stopped, one that exits during its match is started again after 5, 15 and 30 s, and none is
+left running after its match. The MCP address carries a ticket; the server ties the session that uses it
+to the slot (`bind`), `Tools._slot` lets that session play the slot whatever its controller, and the
+match-control tools are refused for it. For AI and Tandem slots `AutoPilot` keeps only the turn limit and
+plays the engine pick when the agent has not moved.
+
+The agent window reads three sources per slot: the player's messages and the agent's `operator_reply`
+answers, every tool call with its result (recorded by the MCP server), and the agent's own words from its
+log (Claude Code `stream-json`, Codex `--json` and Gemini `stream-json` lines; other output as plain
+text). A message waits in the slot's inbox and goes out with the next tool result of the session playing
+that slot.
+
 ## Fairness and safety
 
 - No control in online or lobby matches. Replays are never controlled.
